@@ -12,6 +12,7 @@ import queue
 from functools import wraps
 import traceback
 import logging
+import config_manager  # 导入配置管理模块
 
 # 配置日志
 logging.basicConfig(
@@ -151,6 +152,9 @@ def process_task(task_id, file_path, app_key, prompt, output_path):
     global task_status
     
     try:
+        # 加载配置
+        config = config_manager.load_config()
+        
         # 更新任务状态为处理中
         task_status[task_id]['status'] = 'processing'
         task_status[task_id]['progress'] = 5  # 开始处理
@@ -158,7 +162,10 @@ def process_task(task_id, file_path, app_key, prompt, output_path):
         
         # 设置环境变量
         env = os.environ.copy()
-        env['DASHSCOPE_API_KEY'] = app_key
+        # 使用传入的app_key或配置中的api_key
+        env['DASHSCOPE_API_KEY'] = app_key or config.get('api_key', '')
+        env['TEXT_MODEL'] = config.get('text_model', 'qwen-plus')
+        env['IMAGE_MODEL'] = config.get('image_model', 'qwen-vl-plus')
         
         # 构建命令
         cmd = [
@@ -286,8 +293,15 @@ def process_task(task_id, file_path, app_key, prompt, output_path):
             records_file = os.path.join('.wucai', 'processing_records.json')
             records = []
             if os.path.exists(records_file):
-                with open(records_file, 'r', encoding='utf-8') as f:
-                    records = json.load(f)
+                try:
+                    with open(records_file, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content:  # 检查文件内容是否为空
+                            records = json.loads(content)
+                        else:
+                            records = []  # 空文件则初始化为空列表
+                except (json.JSONDecodeError, FileNotFoundError):
+                    records = []  # 如果解析失败或文件不存在，初始化为空列表
             
             records.append(record)
             
@@ -476,6 +490,80 @@ def get_task_status(task_id):
         log_error(f"获取任务状态时发生错误 {temp_task_id}: {str(e)}")
         return jsonify({'error': f'获取任务状态时发生错误: {str(e)}'}), 500
 
+@app.route('/get_config')
+def get_config():
+    """
+    获取当前配置
+    """
+    try:
+        config = config_manager.load_config()
+        # 不返回完整的API Key，只返回部分用于显示
+        masked_config = config.copy()
+        if masked_config.get('api_key'):
+            api_key = masked_config['api_key']
+            masked_config['api_key'] = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else f"{api_key[:2]}****"
+            masked_config['api_key_configured'] = True
+        else:
+            masked_config['api_key_configured'] = False
+        
+        # 添加模型列表
+        masked_config['supported_models'] = {
+            'text_models': config_manager.SUPPORTED_MODELS['text_models'],
+            'image_models': config_manager.SUPPORTED_MODELS['image_models']
+        }
+        
+        # 添加推荐场景
+        masked_config['recommended_scenarios'] = config_manager.RECOMMENDED_SCENARIOS
+        
+        return jsonify(masked_config)
+    except Exception as e:
+        temp_task_id = str(uuid.uuid4())
+        log_error(f"获取配置时发生错误 {temp_task_id}: {str(e)}")
+        return jsonify({'error': f'获取配置时发生错误: {str(e)}'}), 500
+
+@app.route('/update_config', methods=['POST'])
+def update_config():
+    """
+    更新配置
+    """
+    try:
+        data = request.json
+        api_key = data.get('api_key', '')
+        text_model = data.get('text_model')
+        image_model = data.get('image_model')
+        
+        # 验证模型是否支持
+        if text_model:
+            text_model_valid = False
+            for model in config_manager.SUPPORTED_MODELS['text_models']:
+                if model['id'] == text_model:
+                    text_model_valid = True
+                    break
+            if not text_model_valid:
+                return jsonify({'error': '不支持的文本模型'}), 400
+        
+        if image_model:
+            image_model_valid = False
+            for model in config_manager.SUPPORTED_MODELS['image_models']:
+                if model['id'] == image_model:
+                    image_model_valid = True
+                    break
+            if not image_model_valid:
+                return jsonify({'error': '不支持的图像模型'}), 400
+        
+        # 更新配置
+        success = config_manager.update_config(api_key=api_key, text_model=text_model, image_model=image_model)
+        
+        if success:
+            log_info("配置更新成功")
+            return jsonify({'success': True, 'message': '配置已成功更新'})
+        else:
+            log_error("配置更新失败")
+            return jsonify({'error': '配置更新失败'}), 500
+    except Exception as e:
+        log_error(f"更新配置时出错: {str(e)}")
+        return jsonify({'error': f'系统错误: {str(e)}'}), 500
+
 @app.route('/tasks')
 def get_all_tasks():
     """获取所有任务的状态"""
@@ -499,8 +587,15 @@ def knowledge_base():
         records = []
         
         if os.path.exists(records_file):
-            with open(records_file, 'r', encoding='utf-8') as f:
-                records = json.load(f)
+            try:
+                with open(records_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:  # 检查文件内容是否为空
+                        records = json.loads(content)
+                    else:
+                        records = []  # 空文件则初始化为空列表
+            except (json.JSONDecodeError, FileNotFoundError):
+                records = []  # 如果解析失败或文件不存在，初始化为空列表
         
         # 反转列表以显示最新的记录在前面
         records.reverse()

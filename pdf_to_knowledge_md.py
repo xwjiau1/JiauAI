@@ -13,6 +13,11 @@ from datetime import datetime
 import traceback
 import logging
 
+# 从环境变量获取配置
+TEXT_MODEL = os.environ.get('TEXT_MODEL', 'qwen-plus')
+IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'qwen-vl-plus')
+DASHSCOPE_API_KEY = os.environ.get('DASHSCOPE_API_KEY', '')
+
 # 创建运行日志目录 - 按日期创建日志文件
 today = datetime.now().strftime('%Y%m%d')
 log_dir = "run-log"
@@ -279,8 +284,9 @@ def recognize_image_with_dashscope(api_key, image_path, custom_prompt="请详细
         
         log_info(f"调用DashScope视觉模型API...")
         
+        # 使用配置的图像模型
         response = MultiModalConversation.call(
-            model='qwen-vl-plus',  # 使用视觉模型
+            model=IMAGE_MODEL,
             messages=messages
         )
         
@@ -423,7 +429,7 @@ def call_dashscope_api(api_key, content, user_prompt, config, file_type="pdf"):
     
     try:
         response = dashscope.Generation.call(
-            model='qwen-plus',
+            model=TEXT_MODEL,
             messages=messages,
             result_format='message'
         )
@@ -530,10 +536,19 @@ def load_config():
     log_info("加载配置文件...")
     config_path = ".wucai/config.json"
     if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-        log_info("配置文件加载成功")
-        return config
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if content:  # 检查文件内容是否为空
+                    config = json.loads(content)
+                    log_info("配置文件加载成功")
+                    return config
+                else:
+                    log_info("配置文件为空，使用默认配置")
+                    return {}
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            log_error(f"配置文件读取错误: {str(e)}，使用默认配置")
+            return {}
     else:
         # 创建默认配置
         default_config = {
@@ -581,8 +596,8 @@ def main():
         # 加载配置
         config = load_config()
         
-        # 获取API KEY，优先级：命令行参数 > 环境变量 > 配置文件
-        api_key = args.api_key or os.getenv('DASHSCOPE_API_KEY') or config.get("app_key", "")
+        # 获取API KEY，优先级：命令行参数 > 全局环境变量 > 环境变量 > 配置文件
+        api_key = args.api_key or DASHSCOPE_API_KEY or os.getenv('DASHSCOPE_API_KEY') or config.get("app_key", "")
         
         if not api_key:
             error_msg = "错误: 未提供API KEY，请设置环境变量DASHSCOPE_API_KEY，或使用 --api-key 参数，或在配置文件中设置"
