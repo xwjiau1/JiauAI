@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF转知识库系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            /* 浅色主题变量 */
+            --primary-color: #4361ee;
+            --secondary-color: #3f37c9;
+            --success-color: #4cc9f0;
+            --info-color: #4895ef;
+            --warning-color: #f72585;
+            --danger-color: #e63946;
+            --light-bg: #f8f9fa;
+            --dark-bg: #212529;
+            --card-bg: #ffffff;
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --border-color: #dee2e6;
+            --upload-area-bg: #f8f9fa;
+            --upload-area-border: #ced4da;
+            --header-bg: #ffffff;
+            --body-bg: #f0f2f5;
+            --sidebar-bg: #ffffff;
+            --card-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.075);
+            --card-hover-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.1);
+            --progress-bg: #e9ecef;
+            --progress-bar: #4361ee;
+            --sidebar-width: 260px;
+        }
+
+        [data-theme="dark"] {
+            /* 深色主题变量 */
+            --primary-color: #4895ef;
+            --secondary-color: #3a0ca3;
+            --success-color: #4cc9f0;
+            --info-color: #4895ef;
+            --warning-color: #f72585;
+            --danger-color: #e63946;
+            --light-bg: #121212;
+            --dark-bg: #1e1e1e;
+            --card-bg: #2d2d2d;
+            --text-primary: #e9ecef;
+            --text-secondary: #adb5bd;
+            --border-color: #495057;
+            --upload-area-bg: #252525;
+            --upload-area-border: #495057;
+            --header-bg: #1e1e1e;
+            --body-bg: #121212;
+            --sidebar-bg: #1e1e1e;
+            --card-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.3);
+            --card-hover-shadow: 0 0.75rem 1.5rem rgba(0, 0, 0, 0.4);
+            --progress-bg: #343a40;
+            --progress-bar: #4895ef;
+        }
+
+        body {
+            background-color: var(--body-bg);
+            padding: 0;
+            margin: 0;
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .sidebar {
+            width: var(--sidebar-width);
+            background-color: var(--sidebar-bg);
+            height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            z-index: 1000;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 20px 0;
+        }
+
+        .sidebar-header {
+            padding: 0 20px 20px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+
+        .sidebar-header h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin: 0;
+        }
+
+        .sidebar-nav {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .nav-item-custom {
+            padding: 12px 20px;
+            margin: 0 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 500;
+        }
+
+        .nav-item-custom:hover {
+            background-color: rgba(67, 97, 238, 0.1);
+        }
+
+        .nav-item-custom.active {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .nav-item-custom.active i {
+            color: white;
+        }
+
+        .main-content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            padding: 20px;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            box-shadow: var(--card-shadow);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+        }
+
+        .card:hover {
+            box-shadow: var(--card-hover-shadow);
+        }
+
+        .upload-area {
+            border: 2px dashed var(--upload-area-border);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            background-color: var(--upload-area-bg);
+            color: var(--text-secondary);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary-color);
+            background-color: rgba(67, 97, 238, 0.05);
+        }
+
+        .upload-area i {
+            color: var(--primary-color);
+        }
+
+        .progress {
+            height: 12px;
+            border-radius: 6px;
+            overflow: hidden;
+            background-color: var(--progress-bg);
+            margin-bottom: 10px;
+        }
+
+        .progress-bar {
+            background-color: var(--progress-bar);
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .task-item {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            background-color: var(--card-bg);
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+
+        .task-item:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--card-shadow);
+        }
+
+        .status-pending {
+            border-left: 4px solid var(--warning-color);
+        }
+
+        .status-processing {
+            border-left: 4px solid var(--info-color);
+        }
+
+        .status-completed {
+            border-left: 4px solid var(--success-color);
+        }
+
+        .status-failed {
+            border-left: 4px solid var(--danger-color);
+        }
+
+        .file-info {
+            background-color: var(--upload-area-bg);
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid var(--border-color);
+        }
+
+        .btn {
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+        }
+
+        .btn-outline-primary {
+            color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-outline-primary:hover {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        .form-control {
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border-color);
+            background-color: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .form-control:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(67, 97, 238, 0.25);
+            background-color: var(--card-bg);
+            color: var(--text-primary);
+        }
+
+        .form-text {
+            color: var(--text-secondary);
+        }
+
+        .alert {
+            border-radius: 8px;
+            border: none;
+        }
+
+        .table {
+            color: var(--text-primary);
+        }
+
+        .table th {
+            border-top: none;
+            border-bottom: 2px solid var(--border-color);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .table td {
+            border-top: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .table-striped > tbody > tr:nth-of-type(odd) {
+            --bs-table-accent-bg: rgba(0, 0, 0, 0.02);
+        }
+
+        [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) {
+            --bs-table-accent-bg: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge {
+            border-radius: 6px;
+            padding: 0.35em 0.65em;
+        }
+
+        .toast {
+            border-radius: 8px;
+            border: none;
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+
+        .theme-toggle-btn {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: var(--card-shadow);
+            transition: all 0.3s ease;
+        }
+
+        .theme-toggle-btn:hover {
+            background-color: var(--primary-color);
+            color: white;
+            transform: rotate(30deg);
+        }
+
+        .app-title {
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 1.5rem;
+        }
+
+        .section-title {
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .input-group-text {
+            border-radius: 8px 0 0 8px;
+            border-right: none;
+            background-color: var(--upload-area-bg);
+            border-color: var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .input-group > :not(:first-child):not(.dropdown-menu):not(.valid-tooltip):not(.valid-feedback):not(.invalid-tooltip):not(.invalid-feedback) {
+            border-radius: 0 8px 8px 0;
+            border-left: none;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .hidden {
+            display: none;
+        }
+        
+        /* 移动端响应式优化 */
+        @media (max-width: 768px) {
+            :root {
+                --sidebar-width: 100%;
+            }
+            
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+            
+            .sidebar.active {
+                transform: translateX(0);
+            }
+            
+            .main-content {
+                margin-left: 0;
+                padding: 10px;
+            }
+            
+            .header-actions {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            
+            .theme-toggle {
+                right: 10px;
+                top: 10px;
+            }
+            
+            .upload-area {
+                padding: 1rem;
+            }
+            
+            .card-body {
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="theme-toggle">
+        <div class="theme-toggle-btn" id="themeToggle">
+            <i class="fas fa-moon"></i>
+        </div>
+    </div>
+    
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>
+                <i class="fas fa-brain me-2"></i>
+                AI知识库
+            </h2>
+        </div>
+        <div class="sidebar-nav">
+            <div class="nav-item-custom active" data-tab="home">
+                <i class="fas fa-home"></i>
+                <span>主功能</span>
+            </div>
+            <div class="nav-item-custom" data-tab="tasks">
+                <i class="fas fa-tasks"></i>
+                <span>任务管理</span>
+            </div>
+            <div class="nav-item-custom" data-tab="knowledge">
+                <i class="fas fa-book"></i>
+                <span>知识库</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <!-- 主功能页面 -->
+        <div id="home-page" class="page-content">
+            <div class="header-actions">
+                <h2 class="page-title">
+                    <i class="fas fa-file-import me-2"></i>
+                    文档转换
+                </h2>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <form id="uploadForm" enctype="multipart/form-data">
+                        <div class="mb-4">
+                            <label for="file" class="form-label fw-bold">选择文件</label>
+                            <div class="upload-area" id="uploadArea">
+                                <i class="fas fa-cloud-upload-alt fa-3x mb-3"></i>
+                                <p>点击选择文件或拖拽文件到此处</p>
+                                <p><small>支持格式: PDF, MD, MARKDOWN, PPT, PPTX</small></p>
+                                <input type="file" class="form-control" id="file" name="file" accept=".pdf,.md,.markdown,.ppt,.pptx" style="display: none;">
+                            </div>
+                            <div id="selectedFile" class="file-info mt-3" style="display: none;">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="fas fa-file me-2"></i>
+                                        <span id="fileName"></span>
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearFile()">清除</button>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-outline-primary mt-2" id="browseFileBtn">
+                                <i class="fas fa-folder-open me-2"></i>选择文件
+                            </button>
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="app_key" class="form-label fw-bold">DashScope API Key</label>
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="fas fa-key"></i>
+                                </span>
+                                <input type="password" class="form-control" id="app_key" name="app_key" required>
+                                <button class="btn btn-outline-secondary" type="button" id="toggleKey">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                            <div class="form-text mt-2">
+                                <i class="fas fa-external-link-alt me-1"></i>
+                                <a href="https://dashscope.console.aliyun.com/apiKey" target="_blank">获取API Key</a>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label for="prompt" class="form-label fw-bold">个性化提示词（可选）</label>
+                            <textarea class="form-control" id="prompt" name="prompt" rows="4" placeholder="请输入您对文档处理的特殊要求，如：请重点提取技术要点、请保留数学公式等"></textarea>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100 py-3" id="submitBtn">
+                            <i class="fas fa-paper-plane me-2"></i>开始处理
+                        </button>
+                    </form>
+
+                    <div id="progressArea" class="mt-4" style="display: none;">
+                        <div class="alert alert-info" id="progressInfo">
+                            任务已提交，正在后台处理...
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div id="progressText" class="text-center fw-bold">0%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 任务管理页面 -->
+        <div id="tasks-page" class="page-content hidden">
+            <div class="header-actions">
+                <h2 class="page-title">
+                    <i class="fas fa-tasks me-2"></i>
+                    任务管理
+                </h2>
+                <button class="btn btn-outline-primary" id="refreshTasks">
+                    <i class="fas fa-sync-alt"></i> 刷新
+                </button>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <div id="tasksList">
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-inbox fa-3x mb-3"></i>
+                            <p class="lead">暂无任务记录</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 知识库页面 -->
+        <div id="knowledge-page" class="page-content hidden">
+            <div class="header-actions">
+                <h2 class="page-title">
+                    <i class="fas fa-book me-2"></i>
+                    知识库记录
+                </h2>
+                <button class="btn btn-outline-primary" id="refreshKnowledge">
+                    <i class="fas fa-sync-alt"></i> 刷新
+                </button>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <div id="knowledgeList">
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-book-open fa-3x mb-3"></i>
+                            <p class="lead">暂无知识库记录</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 确保DOM加载完成
+        document.addEventListener('DOMContentLoaded', function() {
+            // 全局变量
+            let currentTaskId = null;
+            let isPolling = false;
+
+            // 获取DOM元素
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('file');
+            const selectedFileDiv = document.getElementById('selectedFile');
+            const fileNameSpan = document.getElementById('fileName');
+            const browseFileBtn = document.getElementById('browseFileBtn');
+            const appKeyInput = document.getElementById('app_key');
+
+            // 从本地存储中加载API Key
+            const savedApiKey = localStorage.getItem('apiKey');
+            if (savedApiKey) {
+                appKeyInput.value = savedApiKey;
+            }
+
+            // 侧边栏导航
+            const navItems = document.querySelectorAll('.nav-item-custom');
+            const pages = document.querySelectorAll('.page-content');
+
+            // 页面切换
+            navItems.forEach(item => {
+                item.addEventListener('click', function() {
+                    // 移除所有活动类
+                    navItems.forEach(nav => nav.classList.remove('active'));
+                    pages.forEach(page => page.classList.add('hidden'));
+                    
+                    // 添加当前活动类
+                    this.classList.add('active');
+                    
+                    // 显示对应页面
+                    const tabId = this.getAttribute('data-tab');
+                    document.getElementById(tabId + '-page').classList.remove('hidden');
+                    
+                    // 刷新数据
+                    if(tabId === 'tasks') {
+                        loadTasks();
+                    } else if(tabId === 'knowledge') {
+                        loadKnowledge();
+                    }
+                });
+            });
+
+            // 文件选择事件
+            fileInput.addEventListener('change', function(e) {
+                if (this.files && this.files[0]) {
+                    // 检查文件大小 (限制为200MB)
+                    const fileSize = this.files[0].size;
+                    const maxSize = 200 * 1024 * 1024; // 200MB
+                    
+                    if (fileSize > maxSize) {
+                        alert('文件大小不能超过200MB');
+                        this.value = '';
+                        return;
+                    }
+                    
+                    fileNameSpan.textContent = this.files[0].name;
+                    selectedFileDiv.style.display = 'block';
+                }
+            });
+
+            // 浏览文件按钮点击事件
+            browseFileBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                fileInput.click();
+            });
+
+            // 上传区域点击事件（也会触发文件选择）
+            uploadArea.addEventListener('click', function(e) {
+                // 如果点击的不是内部的按钮，则触发文件选择
+                if (!e.target.closest('button')) {
+                    fileInput.click();
+                }
+            });
+
+            // 拖拽事件
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                this.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    // 检查文件大小 (限制为200MB)
+                    const fileSize = e.dataTransfer.files[0].size;
+                    const maxSize = 200 * 1024 * 1024; // 200MB
+                    
+                    if (fileSize > maxSize) {
+                        alert('文件大小不能超过200MB');
+                        return;
+                    }
+                    
+                    fileInput.files = e.dataTransfer.files;
+                    fileNameSpan.textContent = e.dataTransfer.files[0].name;
+                    selectedFileDiv.style.display = 'block';
+                }
+            });
+
+            // 清除文件
+            window.clearFile = function() {
+                fileInput.value = '';
+                selectedFileDiv.style.display = 'none';
+            };
+
+            // API Key显示/隐藏切换
+            document.getElementById('toggleKey').addEventListener('click', function() {
+                const keyInput = document.getElementById('app_key');
+                const icon = this.querySelector('i');
+                if (keyInput.type === 'password') {
+                    keyInput.type = 'text';
+                    icon.classList.remove('fa-eye');
+                    icon.classList.add('fa-eye-slash');
+                } else {
+                    keyInput.type = 'password';
+                    icon.classList.remove('fa-eye-slash');
+                    icon.classList.add('fa-eye');
+                }
+            });
+
+            // 表单提交
+            document.getElementById('uploadForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const formData = new FormData(this);
+                const submitBtn = document.getElementById('submitBtn');
+                const progressArea = document.getElementById('progressArea');
+
+                // 验证文件
+                if (!formData.get('file') || formData.get('file').size === 0) {
+                    showToast('请先选择文件', 'error');
+                    return;
+                }
+
+                // 验证API Key
+                const apiKey = formData.get('app_key');
+                if (!apiKey) {
+                    showToast('请输入API Key', 'error');
+                    return;
+                }
+                
+                // 保存API Key到本地存储
+                localStorage.setItem('apiKey', apiKey);
+
+                // 禁用提交按钮
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 处理中...';
+
+                // 显示进度区域
+                progressArea.style.display = 'block';
+                document.getElementById('progressInfo').textContent = '正在上传文件...';
+                document.querySelector('.progress-bar').style.width = '10%';
+                document.getElementById('progressText').textContent = '10%';
+
+                // 提交文件
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        currentTaskId = data.task_id;
+                        document.getElementById('progressInfo').textContent = data.message;
+                        startTaskPolling(data.task_id);
+                    } else {
+                        throw new Error(data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('progressInfo').textContent = '上传失败: ' + error.message;
+                    document.getElementById('progressInfo').className = 'alert alert-danger';
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
+                    
+                    // 5秒后自动隐藏进度区域
+                    setTimeout(() => {
+                        progressArea.style.display = 'none';
+                    }, 5000);
+                });
+            });
+
+            // 轮询任务状态
+            function startTaskPolling(taskId) {
+                if (isPolling) return;
+                isPolling = true;
+
+                const progressInterval = setInterval(() => {
+                    if (!currentTaskId) {
+                        clearInterval(progressInterval);
+                        return;
+                    }
+
+                    fetch('/task_status/' + currentTaskId)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            clearInterval(progressInterval);
+                            isPolling = false;
+                            document.getElementById('progressInfo').textContent = '错误: ' + data.error;
+                            document.getElementById('progressInfo').className = 'alert alert-danger';
+                            document.getElementById('submitBtn').disabled = false;
+                            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
+                            return;
+                        }
+
+                        // 更新进度条
+                        const progress = data.progress || 0;
+                        document.querySelector('.progress-bar').style.width = progress + '%';
+                        document.getElementById('progressText').textContent = progress + '%';
+
+                        // 更新状态信息
+                        document.getElementById('progressInfo').textContent = '任务状态: ' + getStatusText(data.status);
+                        
+                        // 根据状态设置样式
+                        let alertClass = 'alert-info';
+                        if (data.status === 'completed') {
+                            alertClass = 'alert-success';
+                            clearInterval(progressInterval);
+                            isPolling = false;
+                            
+                            // 显示成功消息和下载链接
+                            document.getElementById('progressInfo').innerHTML = `
+                                <i class="fas fa-check-circle text-success"></i> 
+                                处理完成！<br>
+                                <a href="/download/${data.result.output_file}" class="btn btn-success btn-sm mt-2">
+                                    <i class="fas fa-download"></i> 下载结果
+                                </a>
+                                <a href="/view/${data.result.output_file}" class="btn btn-outline-primary btn-sm mt-2" target="_blank">
+                                    <i class="fas fa-eye"></i> 在线查看
+                                </a>
+                            `;
+                            
+                            document.getElementById('submitBtn').disabled = false;
+                            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
+                        } else if (data.status === 'failed') {
+                            alertClass = 'alert-danger';
+                            clearInterval(progressInterval);
+                            isPolling = false;
+                            document.getElementById('progressInfo').innerHTML = '<i class="fas fa-exclamation-triangle text-danger"></i> 处理失败: ' + (data.error || (data.result && data.result.message ? data.result.message : ''));
+                            document.getElementById('submitBtn').disabled = false;
+                            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
+                        }
+                        
+                        document.getElementById('progressInfo').className = 'alert ' + alertClass;
+                    })
+                    .catch(error => {
+                        console.error('Error polling task status:', error);
+                        clearInterval(progressInterval);
+                        isPolling = false;
+                        document.getElementById('progressInfo').textContent = '轮询任务状态失败: ' + error.message;
+                        document.getElementById('progressInfo').className = 'alert alert-danger';
+                        document.getElementById('submitBtn').disabled = false;
+                        document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
+                    });
+                }, 2000); // 每2秒轮询一次
+            }
+
+            // 获取状态文本
+            function getStatusText(status) {
+                switch(status) {
+                    case 'pending': return '等待处理';
+                    case 'processing': return '处理中';
+                    case 'completed': return '处理完成';
+                    case 'failed': return '处理失败';
+                    default: return status;
+                }
+            }
+
+            // 刷新任务列表
+            document.getElementById('refreshTasks').addEventListener('click', loadTasks);
+            
+            // 刷新知识库列表
+            document.getElementById('refreshKnowledge').addEventListener('click', loadKnowledge);
+
+            // 加载任务列表
+            function loadTasks() {
+                fetch('/tasks')
+                .then(response => response.json())
+                .then(data => {
+                    const tasksList = document.getElementById('tasksList');
+                    if (Object.keys(data).length === 0) {
+                        tasksList.innerHTML = `
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-inbox fa-2x mb-2"></i>
+                                <p>暂无任务记录</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    let html = '';
+                    for (const taskId in data) {
+                        const task = data[taskId];
+                        html += `
+                            <div class="task-item status-${task.status}">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">${task.input_filename || (taskId.substring(0, 8) + '...')}</h6>
+                                        <small class="text-muted">状态: ${getStatusText(task.status)}</small>
+                                    </div>
+                                    <div>
+                                        <span class="badge bg-secondary">${Math.round(task.progress || 0)}%</span>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <div class="progress">
+                                        <div class="progress-bar" role="progressbar" style="width: ${task.progress || 0}%">
+                                            ${Math.round(task.progress || 0)}%
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                ${task.start_time ? `<div class="mt-1"><small class="text-muted">开始时间: ${new Date(task.start_time * 1000).toLocaleString()}</small></div>` : ''}
+                                ${task.token_usage ? `<div class="mt-1"><small class="text-muted">Token用量: ${task.token_usage}</small></div>` : ''}
+                                ${task.processing_time ? `<div class="mt-1"><small class="text-muted">处理时长: ${task.processing_time.toFixed(2)}秒</small></div>` : ''}
+                                ${task.output_length ? `<div class="mt-1"><small class="text-muted">输出字数: ${task.output_length}</small></div>` : ''}
+                                
+                                ${task.status === 'failed' && task.error ? `
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-outline-danger" type="button" data-bs-toggle="collapse" data-bs-target="#error-${taskId}" aria-expanded="false">
+                                        查看错误详情
+                                    </button>
+                                    <div class="collapse" id="error-${taskId}">
+                                        <div class="card card-body mt-2 p-2">
+                                            <pre class="mb-0" style="font-size: 0.8em; max-height: 150px; overflow-y: auto;">${task.error}</pre>
+                                        </div>
+                                    </div>
+                                </div>
+                                ` : ''}                    
+
+                            </div>
+                        `;
+                    }
+                    tasksList.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Error loading tasks:', error);
+                    document.getElementById('tasksList').innerHTML = `
+                        <div class="alert alert-danger">
+                            加载任务列表失败: ${error.message}
+                        </div>
+                    `;
+                });
+            }
+
+            // 加载知识库列表
+            function loadKnowledge() {
+                fetch('/knowledge_base')
+                .then(response => response.json())
+                .then(data => {
+                    const knowledgeList = document.getElementById('knowledgeList');
+                    if (data.length === 0) {
+                        knowledgeList.innerHTML = `
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-book-open fa-2x mb-2"></i>
+                                <p>暂无知识库记录</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    let html = '<div class="table-responsive"><table class="table table-striped"><thead><tr><th>输入文件</th><th>输出文件</th><th>Prompt</th><th>输出时间</th><th>操作</th></tr></thead><tbody>';
+                    data.forEach(record => {
+                        // 限制Prompt显示长度并提供复制功能
+                        let displayPrompt = record.prompt || '';
+                        let truncatedPrompt = displayPrompt.length > 30 ? displayPrompt.substring(0, 30) + '...' : displayPrompt;
+                        html += `
+                            <tr>
+                                <td>${record.input_file}</td>
+                                <td>${record.output_file}</td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <span title="${record.prompt || ''}">${truncatedPrompt}</span>
+                                        ${record.prompt ? `<button class="btn btn-sm btn-outline-secondary ms-2" onclick="copyPrompt('${encodeURIComponent(record.prompt)}')" title="复制Prompt" aria-label="复制Prompt">
+                                            <i class="fas fa-copy"></i>
+                                        </button>` : ''}
+                                    </div>
+                                </td>
+                                <td>${record.timestamp}</td>
+                                <td>
+                                    <a href="/download/${record.output_file}" class="btn btn-success btn-sm">
+                                        <i class="fas fa-download"></i> 下载
+                                    </a>
+                                    <a href="/view/${record.output_file}" class="btn btn-outline-primary btn-sm" target="_blank">
+                                        <i class="fas fa-eye"></i> 查看
+                                    </a>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    html += '</tbody></table></div>';
+                    knowledgeList.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Error loading knowledge base:', error);
+                    document.getElementById('knowledgeList').innerHTML = `
+                        <div class="alert alert-danger">
+                            加载知识库记录失败: ${error.message}
+                        </div>
+                    `;
+                });
+            }
+
+            // 页面加载时初始化
+            loadTasks();
+            loadKnowledge();
+
+            // 复制Prompt内容到剪贴板
+            window.copyPrompt = function(promptText) {
+                try {
+                    // 解码URI编码的字符串
+                    const decodedText = decodeURIComponent(promptText);
+                    navigator.clipboard.writeText(decodedText).then(function() {
+                        showToast('Prompt已复制到剪贴板！', 'success');
+                    }).catch(function(err) {
+                        console.error('复制失败: ', err);
+                        showToast('复制失败，请手动复制', 'error');
+                    });
+                } catch (e) {
+                    console.error('解码错误: ', e);
+                    showToast('复制过程中发生错误', 'error');
+                }
+            };
+            
+            // 显示Toast消息
+            function showToast(message, type = 'info') {
+                // 移除现有toast
+                const existingToast = document.querySelector('.toast');
+                if (existingToast) {
+                    existingToast.remove();
+                }
+                
+                // 创建新toast
+                const toast = document.createElement('div');
+                const bgClass = type === 'success' ? 'text-bg-success' : type === 'error' ? 'text-bg-danger' : 'text-bg-info';
+                toast.className = 'toast align-items-center position-fixed bottom-0 end-0 m-3 ' + bgClass;
+                toast.setAttribute('role', 'alert');
+                toast.setAttribute('aria-live', 'assertive');
+                toast.setAttribute('aria-atomic', 'true');
+                toast.innerHTML = `
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                `;
+                document.body.appendChild(toast);
+                
+                const bsToast = new bootstrap.Toast(toast);
+                bsToast.show();
+                
+                // 自动移除toast元素
+                setTimeout(() => {
+                    toast.remove();
+                }, 3000);
+            }
+            
+            // 主题切换功能
+            const themeToggle = document.getElementById('themeToggle');
+            const themeIcon = themeToggle.querySelector('i');
+            
+            // 检查本地存储中的主题偏好
+            const currentTheme = localStorage.getItem('theme');
+            if (currentTheme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                themeIcon.className = 'fas fa-sun';
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+                themeIcon.className = 'fas fa-moon';
+            }
+            
+            // 切换主题
+            themeToggle.addEventListener('click', function() {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                if (currentTheme === 'dark') {
+                    // 切换到浅色主题
+                    document.documentElement.removeAttribute('data-theme');
+                    localStorage.setItem('theme', 'light');
+                    themeIcon.className = 'fas fa-moon';
+                } else {
+                    // 切换到深色主题
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                    localStorage.setItem('theme', 'dark');
+                    themeIcon.className = 'fas fa-sun';
+                }
+            });
+        });
+    </script>
+</body>
+</html>
