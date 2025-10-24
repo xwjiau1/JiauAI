@@ -147,7 +147,7 @@ def log_error_detail(task_id, file_path, error_message, error_type="processing_e
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def process_task(task_id, file_path, app_key, prompt, output_path):
+def process_task(task_id, file_path, api_key, prompt, output_path):
     """处理单个任务的函数"""
     global task_status
     
@@ -160,21 +160,25 @@ def process_task(task_id, file_path, app_key, prompt, output_path):
         task_status[task_id]['progress'] = 5  # 开始处理
         save_task_status()  # 保存状态到文件
         
-        # 设置环境变量
+        # 不设置环境变量，使用config_manager中的配置
         env = os.environ.copy()
-        # 使用传入的app_key或配置中的api_key
-        env['DASHSCOPE_API_KEY'] = app_key or config.get('api_key', '')
-        env['TEXT_MODEL'] = config.get('text_model', 'qwen-plus')
-        env['IMAGE_MODEL'] = config.get('image_model', 'qwen-vl-plus')
+        # 移除可能存在的旧环境变量
+        for key in ['DASHSCOPE_API_KEY', 'TEXT_MODEL', 'IMAGE_MODEL']:
+            if key in env:
+                del env[key]
         
         # 构建命令
         cmd = [
             'python', 'pdf_to_knowledge_md.py',
             file_path,
             '--prompt', prompt,
-            '--output', output_path,
-            '--api-key', app_key
+            '--output', output_path
         ]
+        
+        # 使用传入的api_key或配置中的api_key
+        api_key_to_use = api_key or config.get('api_key', '')
+        if api_key_to_use:
+            cmd.extend(['--api-key', api_key_to_use])
         
         # 更新进度到20%
         task_status[task_id]['progress'] = 20
@@ -372,14 +376,14 @@ def task_worker():
             
             task_id = task_data['task_id']
             file_path = task_data['file_path']
-            app_key = task_data['app_key']
+            api_key = task_data['api_key']  # 修改为api_key以符合命名规范
             prompt = task_data['prompt']
             output_path = task_data['output_path']
             
             # 启动处理线程
             processing_thread = threading.Thread(
                 target=process_task,
-                args=(task_id, file_path, app_key, prompt, output_path)
+                args=(task_id, file_path, api_key, prompt, output_path)
             )
             processing_thread.start()
             
@@ -412,12 +416,18 @@ def upload_file():
         if not allowed_file(file.filename):
             return jsonify({'error': '不支持的文件格式'}), 400
         
-        # 获取其他参数
-        app_key = request.form.get('app_key', '')
+        # 获取提示词参数
         prompt = request.form.get('prompt', '')
         
-        if not app_key:
-            return jsonify({'error': '请输入App Key'}), 400
+        # 从配置中心读取API Key
+        config = config_manager.load_config()
+        api_key = config.get('api_key', '')
+        # 兼容app_key字段
+        if not api_key and 'app_key' in config:
+            api_key = config['app_key']
+            
+        if not api_key:
+            return jsonify({'error': 'API Key未配置，请在配置中心设置'}), 400
         
         # 生成任务ID
         task_id = str(uuid.uuid4())
@@ -439,6 +449,10 @@ def upload_file():
         # 记录任务开始时间
         start_time = time.time()
         
+        # 从配置中心读取模型信息
+        text_model = config.get('text_model', 'qwen-max')
+        image_model = config.get('image_model', 'qwen-vl-plus')
+        
         # 初始化任务状态
         task_status[task_id] = {
             'status': 'pending',
@@ -447,7 +461,9 @@ def upload_file():
             'start_time': start_time,
             'end_time': None,
             'result': None,
-            'error': None
+            'error': None,
+            'text_model': text_model,
+            'image_model': image_model
         }
         save_task_status()  # 保存状态到文件
         
@@ -455,7 +471,7 @@ def upload_file():
         task_data = {
             'task_id': task_id,
             'file_path': file_path,
-            'app_key': app_key,
+            'api_key': api_key,  # 修改为api_key以符合命名规范
             'prompt': prompt,
             'output_path': output_path
         }
@@ -499,12 +515,26 @@ def get_config():
         config = config_manager.load_config()
         # 不返回完整的API Key，只返回部分用于显示
         masked_config = config.copy()
-        if masked_config.get('api_key'):
-            api_key = masked_config['api_key']
+        # 修复：同时检查api_key和app_key字段（处理命名不一致问题）
+        api_key = masked_config.get('api_key', '')
+        # 如果api_key为空，尝试从app_key获取（兼容不同的字段命名）
+        if not api_key and 'app_key' in masked_config:
+            api_key = masked_config['app_key']
+        
+        # 获取其他配置项
+        text_model = masked_config.get('text_model', '')
+        image_model = masked_config.get('image_model', '')
+            
+        # 修复：只有当所有配置项（api_key、text_model、image_model）都不为空时，小球才亮起
+        all_configs_completed = (
+            isinstance(api_key, str) and api_key.strip() and
+            isinstance(text_model, str) and text_model.strip() and
+            isinstance(image_model, str) and image_model.strip()
+        )
+        
+        if isinstance(api_key, str) and api_key.strip():
             masked_config['api_key'] = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else f"{api_key[:2]}****"
-            masked_config['api_key_configured'] = True
-        else:
-            masked_config['api_key_configured'] = False
+        masked_config['api_key_configured'] = all_configs_completed
         
         # 添加模型列表
         masked_config['supported_models'] = {
@@ -723,4 +753,4 @@ if __name__ == '__main__':
     # os.chdir(application_path)
     
     # 运行应用
-    app.run(debug=False, port=5004)  # 改为端口5000保持一致性
+    app.run(debug=False, port=5000)  # 改为端口5000保持一致性

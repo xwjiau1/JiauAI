@@ -347,25 +347,36 @@
             position: fixed;
             bottom: 20px;
             left: 20px;
-            width: 50px;
-            height: 50px;
+            width: 55px;
+            height: 55px;
             cursor: pointer;
-            z-index: 1000;
+            z-index: 9999; /* 提高层级确保在最上层 */
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .settings-globe {
             width: 100%;
             height: 100%;
             border-radius: 50%;
-            background: linear-gradient(45deg, #ccc, #aaa);
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
             transition: all 0.3s ease;
+            border: 2px solid white; /* 添加白色边框增强可视性 */
         }
         
         .settings-globe.configured {
             background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
-            animation: spin 3s linear infinite;
-            box-shadow: 0 0 20px rgba(var(--primary-color-rgb), 0.5);
+            animation: spin 20s linear infinite; /* 降低旋转速度 */
+            box-shadow: 0 0 30px rgba(var(--primary-color-rgb), 0.7);
+            border: 2px solid var(--primary-color); /* 使用主题色边框 */
+        }
+        
+        /* 增加悬停效果 */
+        .settings-globe:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 25px rgba(0, 0, 0, 0.4);
         }
         
         @keyframes spin {
@@ -731,20 +742,11 @@
                             </button>
                         </div>
 
+                        <!-- DashScope API Key输入框已移除，现在统一从配置中心读取 -->
                         <div class="mb-4">
-                            <label for="app_key" class="form-label fw-bold">DashScope API Key</label>
-                            <div class="input-group">
-                                <span class="input-group-text">
-                                    <i class="fas fa-key"></i>
-                                </span>
-                                <input type="password" class="form-control" id="app_key" name="app_key" required>
-                                <button class="btn btn-outline-secondary" type="button" id="toggleKey">
-                                    <i class="fas fa-eye"></i>
-                                </button>
-                            </div>
-                            <div class="form-text mt-2">
-                                <i class="fas fa-external-link-alt me-1"></i>
-                                <a href="https://dashscope.console.aliyun.com/apiKey" target="_blank">获取API Key</a>
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-2"></i>
+                                API Key已从配置中心读取，请点击左下角配置图标查看或修改。
                             </div>
                         </div>
 
@@ -938,23 +940,27 @@
                 selectedFileDiv.style.display = 'none';
             };
 
-            // API Key显示/隐藏切换
-            document.getElementById('toggleKey').addEventListener('click', function() {
-                const keyInput = document.getElementById('app_key');
-                const icon = this.querySelector('i');
-                if (keyInput.type === 'password') {
-                    keyInput.type = 'text';
-                    icon.classList.remove('fa-eye');
-                    icon.classList.add('fa-eye-slash');
-                } else {
-                    keyInput.type = 'password';
-                    icon.classList.remove('fa-eye-slash');
-                    icon.classList.add('fa-eye');
-                }
-            });
+            // API Key显示/隐藏切换 - 添加安全检查
+            const toggleKeyElement = document.getElementById('toggleKey');
+            if (toggleKeyElement) {
+                toggleKeyElement.addEventListener('click', function() {
+                    const keyInput = document.getElementById('app_key');
+                    const icon = this.querySelector('i');
+                    if (keyInput && keyInput.type === 'password') {
+                        keyInput.type = 'text';
+                        icon.classList.remove('fa-eye');
+                        icon.classList.add('fa-eye-slash');
+                    } else if (keyInput) {
+                        // 增加安全检查
+                        keyInput.type = 'password';
+                        icon.classList.remove('fa-eye-slash');
+                        icon.classList.add('fa-eye');
+                    }
+                });
+            }
 
             // 表单提交
-            document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            document.getElementById('uploadForm').addEventListener('submit', async function(e) {
                 e.preventDefault();
                 
                 const formData = new FormData(this);
@@ -967,15 +973,31 @@
                     return;
                 }
 
-                // 验证API Key
-                const apiKey = formData.get('app_key');
-                if (!apiKey) {
-                    showToast('请输入API Key', 'error');
+                // 从系统配置中获取API Key，不再从表单读取
+                let apiKey = null;
+                try {
+                    // 尝试直接获取配置，如果已存在
+                    const response = await fetch('/get_config');
+                    if (response.ok) {
+                        const config = await response.json();
+                        if (!config.error && config.api_key) {
+                            apiKey = config.api_key;
+                        }
+                    }
+                    
+                    // 如果配置中没有API Key，显示错误提示
+                    if (!apiKey) {
+                        showToast('请先在配置中心设置API Key', 'error');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('获取配置失败:', error);
+                    showToast('获取配置失败，请重试', 'error');
                     return;
                 }
                 
-                // 保存API Key到本地存储
-                localStorage.setItem('apiKey', apiKey);
+                // 添加API Key到formData中用于提交
+                formData.set('api_key', apiKey);
 
                 // 禁用提交按钮
                 submitBtn.disabled = true;
@@ -1151,6 +1173,8 @@
                                 ${task.token_usage ? `<div class="mt-1"><small class="text-muted">Token用量: ${task.token_usage}</small></div>` : ''}
                                 ${task.processing_time ? `<div class="mt-1"><small class="text-muted">处理时长: ${task.processing_time.toFixed(2)}秒</small></div>` : ''}
                                 ${task.output_length ? `<div class="mt-1"><small class="text-muted">输出字数: ${task.output_length}</small></div>` : ''}
+                                ${task.text_model ? `<div class="mt-1"><small class="text-muted">文本模型: ${task.text_model}</small></div>` : ''}
+                                ${task.image_model ? `<div class="mt-1"><small class="text-muted">图像模型: ${task.image_model}</small></div>` : ''}
                                 
                                 ${task.status === 'failed' && task.error ? `
                                 <div class="mt-2">
@@ -1296,13 +1320,29 @@
             // 设置相关功能
             let isSettingsModalOpen = false;
             
-            // 创建设置图标
-            const settingsContainer = document.createElement('div');
-            settingsContainer.id = 'settings-icon';
-            settingsContainer.className = 'settings-icon';
-            settingsContainer.innerHTML = '<div class="settings-globe"></div>';
-            settingsContainer.onclick = toggleSettingsModal;
-            document.body.appendChild(settingsContainer);
+            // 创建设置图标函数
+            function createSettingsIcon() {
+                try {
+                    // 检查是否已存在设置图标
+                    if (document.getElementById('settings-icon')) {
+                        console.log('设置图标已存在');
+                        return;
+                    }
+                    
+                    const settingsContainer = document.createElement('div');
+                    settingsContainer.id = 'settings-icon';
+                    settingsContainer.className = 'settings-icon';
+                    settingsContainer.innerHTML = '<div class="settings-globe"></div>';
+                    settingsContainer.onclick = toggleSettingsModal;
+                    document.body.appendChild(settingsContainer);
+                    console.log('设置图标创建成功');
+                } catch (error) {
+                    console.error('创建设置图标失败:', error);
+                }
+            }
+            
+            // 立即创建设置图标，确保它总是被创建
+            createSettingsIcon();
             
             // 创建设置弹窗
             const settingsModal = document.createElement('div');
@@ -1318,6 +1358,11 @@
                         <div class="form-group">
                             <label for="api-key">DashScope API Key</label>
                             <input type="password" id="api-key" placeholder="请输入API Key">
+                            <div class="mt-1">
+                                <a href="https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key" target="_blank" class="text-primary text-sm">
+                                    <i class="fas fa-key"></i> 获取API Key
+                                </a>
+                            </div>
                         </div>
                         
                         <div class="form-group">
@@ -1422,8 +1467,14 @@
                             return;
                         }
                         
-                        // 填充API Key
-                        document.getElementById('api-key').value = '';
+                        // 填充API Key - 使用掩码后的API Key
+                        if (config.api_key) {
+                            // 如果配置中有掩码后的API Key，使用它
+                            document.getElementById('api-key').value = config.api_key;
+                        } else {
+                            // 否则清空输入框
+                            document.getElementById('api-key').value = '';
+                        }
                         
                         // 填充模型选择
                         fillModelSelections(config.supported_models);
@@ -1457,11 +1508,16 @@
             }
             
             function updateSettingsIcon(isConfigured) {
+                // 添加安全检查，确保元素存在
                 const globe = document.querySelector('.settings-globe');
-                if (isConfigured) {
-                    globe.classList.add('configured');
+                if (globe) {
+                    if (isConfigured) {
+                        globe.classList.add('configured');
+                    } else {
+                        globe.classList.remove('configured');
+                    }
                 } else {
-                    globe.classList.remove('configured');
+                    console.warn('设置图标元素未找到');
                 }
             }
             
@@ -1533,7 +1589,15 @@
                 const container = document.getElementById('scenarios-container');
                 container.innerHTML = '';
                 
+                // 添加参数检查，确保scenarios是有效的数组
+                if (!Array.isArray(scenarios)) {
+                    console.warn('推荐场景数据格式错误，期望一个数组');
+                    return;
+                }
+                
                 scenarios.forEach(scenario => {
+                    if (!scenario || !scenario.scenario) return;
+                    
                     const card = document.createElement('div');
                     card.className = 'scenario-card';
                     
@@ -1541,9 +1605,16 @@
                     content += '<p><strong>推荐模型:</strong></p>';
                     content += '<div class="model-tags">';
                     
-                    scenario.recommended_models.forEach(model => {
-                        content += `<span class="model-tag">${model}</span>`;
-                    });
+                    // 兼容不同的字段命名
+                    if (Array.isArray(scenario.recommended_models)) {
+                        // 如果是数组格式的推荐模型列表
+                        scenario.recommended_models.forEach(model => {
+                            content += `<span class="model-tag">${model}</span>`;
+                        });
+                    } else if (scenario.recommended_model) {
+                        // 如果是单个字符串格式的推荐模型
+                        content += `<span class="model-tag">${scenario.recommended_model}</span>`;
+                    }
                     
                     content += '</div>';
                     card.innerHTML = content;
@@ -1589,7 +1660,12 @@
                         showToast('保存配置失败: ' + data.error, 'error');
                     } else {
                         showToast('配置保存成功!', 'success');
-                        updateSettingsIcon(true);
+                        // 获取API Key和模型选择值，检查是否都已配置
+                        const apiKey = document.getElementById('api-key').value;
+                        const textModel = document.getElementById('text-model').value;
+                        const imageModel = document.getElementById('image-model').value;
+                        // 只有当所有配置项都不为空时，小球才亮起
+                        updateSettingsIcon(!!apiKey.trim() && !!textModel && !!imageModel);
                         closeSettingsModal();
                     }
                 })
@@ -1600,14 +1676,33 @@
             }
             
             // 初始化设置图标状态
-            fetch('/get_config')
-                .then(response => response.json())
-                .then(config => {
-                    updateSettingsIcon(config.api_key_configured);
-                })
-                .catch(error => {
-                    console.error('初始化设置图标状态失败:', error);
-                });
+            function initializeSettings() {
+                console.log('开始初始化设置图标状态');
+                // 确保设置图标已创建
+                createSettingsIcon();
+                fetch('/get_config')
+                    .then(response => {
+                        console.log('获取配置响应状态:', response.status);
+                        if (!response.ok) {
+                            throw new Error(`HTTP错误! 状态: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(config => {
+                        console.log('获取配置成功，配置数据:', config);
+                        // 检查是否有api_key_configured字段，如果没有则默认为false
+                        const isConfigured = config && config.api_key_configured !== undefined ? config.api_key_configured : false;
+                        updateSettingsIcon(isConfigured);
+                    })
+                    .catch(error => {
+                        console.error('初始化设置图标状态失败:', error);
+                        // 出错时默认为未配置状态
+                        updateSettingsIcon(false);
+                    });
+            }
+            
+            // 页面加载后初始化
+            // initializeSettings();
             
             // 点击弹窗外部关闭弹窗
             window.onclick = function(event) {

@@ -10,10 +10,11 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = os.path.join('.wucai', 'config.json')
 
 # 默认配置
+# 修复：确保所有配置都从小球配置中心读取，不使用默认值
 DEFAULT_CONFIG = {
     'api_key': '',
-    'text_model': 'qwen-plus',
-    'image_model': 'qwen-vl-plus',
+    'text_model': '',
+    'image_model': '', 
     'last_updated': ''
 }
 

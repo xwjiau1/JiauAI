@@ -13,10 +13,10 @@ from datetime import datetime
 import traceback
 import logging
 
-# 从环境变量获取配置
-TEXT_MODEL = os.environ.get('TEXT_MODEL', 'qwen-plus')
-IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'qwen-vl-plus')
-DASHSCOPE_API_KEY = os.environ.get('DASHSCOPE_API_KEY', '')
+# 导入配置管理器
+import config_manager
+
+# 修复：确保所有配置都从小球配置中心读取，不再使用环境变量
 
 # 创建运行日志目录 - 按日期创建日志文件
 today = datetime.now().strftime('%Y%m%d')
@@ -257,6 +257,10 @@ def recognize_image_with_dashscope(api_key, image_path, custom_prompt="请详细
     log_info(f"使用提示词: {custom_prompt}")
     dashscope.api_key = api_key
     
+    # 加载配置以获取图像模型名称
+    config = config_manager.load_config()
+    image_model = config.get('image_model', 'qwen-vl-plus')
+    
     try:
         # 构建消息，包含图片和描述请求
         if image_path.startswith('http://') or image_path.startswith('https://'):
@@ -283,10 +287,11 @@ def recognize_image_with_dashscope(api_key, image_path, custom_prompt="请详细
             ]
         
         log_info(f"调用DashScope视觉模型API...")
+        log_info(f"使用图像模型: {image_model}")
         
-        # 使用配置的图像模型
+        # 使用从配置管理器获取的图像模型
         response = MultiModalConversation.call(
-            model=IMAGE_MODEL,
+            model=image_model,
             messages=messages
         )
         
@@ -401,18 +406,21 @@ def call_dashscope_api(api_key, content, user_prompt, config, file_type="pdf"):
     log_info(f"内容长度: {len(content)} 字符")
     log_info(f"用户提示词: {user_prompt}")
     
+    # 修复：使用传入的api_key参数，而不是从环境变量获取
     dashscope.api_key = api_key
+    
+    # 修复：使用传入的config参数，确保与config_manager保持一致
     
     # 根据文件类型调整提示词
     if file_type == "markdown":
-        default_prompt = config.get("default_markdown_prompt", 
-                                   "请将以下markdown内容整理成适合作为个人知识库的格式，要求结构清晰，保留原有格式，并将图片描述整合到内容中，便于阅读和后续查阅。")
+        default_prompt = config.get("default_markdown_prompt", "")
     elif file_type == "ppt":
-        default_prompt = config.get("default_ppt_prompt", 
-                                   "请将以下PPT内容整理成适合作为个人知识库的格式，要求保留幻灯片结构，提取关键知识点，并将图片内容整合到相应位置，便于阅读和后续查阅。")
+        default_prompt = config.get("default_ppt_prompt", "")
     else:
-        default_prompt = config.get("default_prompt", 
-                                   "请将以下内容整理成适合作为个人知识库的markdown格式文档，要求结构清晰，便于阅读和后续查阅。")
+        default_prompt = config.get("default_prompt", "")
+    
+    # 如果没有配置提示词，使用空字符串
+    default_prompt = default_prompt or ""
     
     full_prompt = f"{default_prompt}\n\n额外要求: {user_prompt}\n\n内容如下:\n\n{content}"
     
@@ -428,8 +436,11 @@ def call_dashscope_api(api_key, content, user_prompt, config, file_type="pdf"):
     total_tokens = 0
     
     try:
+        # 从配置中获取模型名称，如果未配置则使用默认值
+        text_model = config.get('text_model', 'qwen-plus')
+        
         response = dashscope.Generation.call(
-            model=TEXT_MODEL,
+            model=text_model,
             messages=messages,
             result_format='message'
         )
@@ -529,40 +540,7 @@ def save_markdown(content, output_path):
         log_error(f"详细错误信息: {traceback.format_exc()}")
         return False
 
-def load_config():
-    """
-    从配置文件加载配置
-    """
-    log_info("加载配置文件...")
-    config_path = ".wucai/config.json"
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if content:  # 检查文件内容是否为空
-                    config = json.loads(content)
-                    log_info("配置文件加载成功")
-                    return config
-                else:
-                    log_info("配置文件为空，使用默认配置")
-                    return {}
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            log_error(f"配置文件读取错误: {str(e)}，使用默认配置")
-            return {}
-    else:
-        # 创建默认配置
-        default_config = {
-            "app_key": "",
-            "default_prompt": "请将以下PDF内容整理成适合作为个人知识库的markdown格式文档，要求结构清晰，便于阅读和后续查阅。",
-            "default_markdown_prompt": "请将以下markdown内容整理成适作为个人知识库的格式，要求结构清晰，保留原有格式，并将图片描述整合到内容中，便于阅读和后续查阅。",
-            "default_ppt_prompt": "请将以下PPT内容整理成适合作为个人知识库的格式，要求保留幻灯片结构，提取关键知识点，并将图片内容整合到相应位置，便于阅读和后续查阅。",
-            "output_dir": "./output"
-        }
-        os.makedirs(".wucai", exist_ok=True)
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(default_config, f, ensure_ascii=False, indent=2)
-        log_info("创建默认配置文件")
-        return default_config
+# 使用config_manager模块加载配置，不再使用自定义load_config函数
 
 def main():
     try:
@@ -594,13 +572,14 @@ def main():
         log_info(f"处理文件类型: {file_ext}")
         
         # 加载配置
-        config = load_config()
+        config = config_manager.load_config()
         
-        # 获取API KEY，优先级：命令行参数 > 全局环境变量 > 环境变量 > 配置文件
-        api_key = args.api_key or DASHSCOPE_API_KEY or os.getenv('DASHSCOPE_API_KEY') or config.get("app_key", "")
+        # 获取API KEY，优先级：命令行参数 > 配置管理器
+        # 注意：虽然保留了命令行参数支持，但优先使用配置管理器中的配置
+        api_key = args.api_key or config.get('api_key', '')
         
         if not api_key:
-            error_msg = "错误: 未提供API KEY，请设置环境变量DASHSCOPE_API_KEY，或使用 --api-key 参数，或在配置文件中设置"
+            error_msg = "错误: 未提供API KEY，请在系统配置中设置API密钥"
             log_error(error_msg)
             sys.exit(1)
         
