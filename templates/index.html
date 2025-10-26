@@ -6,6 +6,7 @@
     <title>PDF转知识库系统</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/markdown-style.css') }}">
     <style>
         :root {
             /* 浅色主题变量 */
@@ -636,6 +637,52 @@
             margin-bottom: 5px;
         }
         
+        /* 弹窗预览样式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .markdown-preview-modal {
+            background: var(--card-bg);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 1000px;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 5px 30px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-header-preview {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header-preview h3 {
+            margin: 0;
+            font-size: 1.1em;
+        }
+        
+        #previewContent {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        
         /* 移动端响应式优化 */
         @media (max-width: 768px) {
             :root {
@@ -1084,9 +1131,9 @@
                                 <a href="/download/${data.result.output_file}" class="btn btn-success btn-sm mt-2">
                                     <i class="fas fa-download"></i> 下载结果
                                 </a>
-                                <a href="/view/${data.result.output_file}" class="btn btn-outline-primary btn-sm mt-2" target="_blank">
-                                    <i class="fas fa-eye"></i> 在线查看
-                                </a>
+                                <button class="btn btn-outline-primary btn-sm mt-2" onclick="openMarkdownPreview('${data.result.output_file}')">
+                                    <i class="fas fa-eye"></i> 预览
+                                </button>
                             `;
                             
                             document.getElementById('submitBtn').disabled = false;
@@ -1242,9 +1289,9 @@
                                     <a href="/download/${record.output_file}" class="btn btn-success btn-sm">
                                         <i class="fas fa-download"></i> 下载
                                     </a>
-                                    <a href="/view/${record.output_file}" class="btn btn-outline-primary btn-sm" target="_blank">
-                                        <i class="fas fa-eye"></i> 查看
-                                    </a>
+                                    <button class="btn btn-outline-primary btn-sm" onclick="openMarkdownPreview('${record.output_file}')">
+                                        <i class="fas fa-eye"></i> 预览
+                                    </button>
                                 </td>
                             </tr>
                         `;
@@ -1712,12 +1759,157 @@
                 }
             };
             
+            // Markdown预览弹窗功能
+            function openMarkdownPreview(filename) {
+                // 创建弹窗遮罩
+                const overlay = document.createElement('div');
+                overlay.className = 'modal-overlay';
+                overlay.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background-color: rgba(0, 0, 0, 0.7);
+                    z-index: 9999;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                `;
+                
+                // 创建弹窗内容
+                const modalContent = document.createElement('div');
+                modalContent.className = 'markdown-preview-modal';
+                modalContent.style.cssText = `
+                    background: var(--card-bg);
+                    border-radius: 12px;
+                    width: 90%;
+                    max-width: 1000px;
+                    max-height: 90vh;
+                    overflow: hidden;
+                    box-shadow: 0 5px 30px rgba(0, 0, 0, 0.3);
+                    display: flex;
+                    flex-direction: column;
+                `;
+                
+                // 创建弹窗头部
+                const modalHeader = document.createElement('div');
+                modalHeader.className = 'modal-header-preview';
+                modalHeader.style.cssText = `
+                    background-color: var(--primary-color);
+                    color: white;
+                    padding: 15px 20px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                `;
+                modalHeader.innerHTML = `
+                    <h3>文档预览 - ${filename}</h3>
+                    <button id="closePreviewBtn" style="
+                        background: none;
+                        border: none;
+                        color: white;
+                        font-size: 24px;
+                        cursor: pointer;
+                        padding: 0;
+                        width: 30px;
+                        height: 30px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    ">&times;</button>
+                `;
+                
+                // 创建加载指示器
+                const loadingDiv = document.createElement('div');
+                loadingDiv.id = 'previewLoading';
+                loadingDiv.style.cssText = `
+                    padding: 20px;
+                    text-align: center;
+                    color: var(--text-secondary);
+                `;
+                loadingDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 加载中...';
+                
+                // 创建内容区域
+                const contentDiv = document.createElement('div');
+                contentDiv.id = 'previewContent';
+                contentDiv.className = 'markdown-body';
+                contentDiv.style.cssText = `
+                    padding: 20px;
+                    overflow-y: auto;
+                    flex: 1;
+                    display: none;
+                `;
+                
+                // 组装弹窗
+                modalContent.appendChild(modalHeader);
+                modalContent.appendChild(loadingDiv);
+                modalContent.appendChild(contentDiv);
+                overlay.appendChild(modalContent);
+                
+                // 添加到页面
+                document.body.appendChild(overlay);
+                
+                // 关闭功能
+                document.getElementById('closePreviewBtn').onclick = function() {
+                    document.body.removeChild(overlay);
+                };
+                
+                // 点击遮罩关闭
+                overlay.onclick = function(event) {
+                    if (event.target === overlay) {
+                        document.body.removeChild(overlay);
+                    }
+                };
+                
+                // 获取并渲染Markdown内容
+                fetch('/view/' + filename)
+                    .then(response => response.text())
+                    .then(markdownText => {
+                        // 渲染Markdown内容
+                        fetch('/render_markdown', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ markdown: markdownText })
+                        })
+                        .then(response => response.json())
+                        .then(result => {
+                            if (result.success) {
+                                loadingDiv.style.display = 'none';
+                                contentDiv.innerHTML = result.html;
+                                contentDiv.style.display = 'block';
+                                
+                                // 如果存在代码块，添加高亮
+                                if (typeof hljs !== 'undefined') {
+                                    contentDiv.querySelectorAll('pre code').forEach(block => {
+                                        hljs.highlightElement(block);
+                                    });
+                                }
+                            } else {
+                                loadingDiv.innerHTML = `<p style="color: var(--danger-color);">渲染失败: ${result.error}</p>`;
+                            }
+                        })
+                        .catch(error => {
+                            loadingDiv.innerHTML = `<p style="color: var(--danger-color);">渲染错误: ${error.message}</p>`;
+                        });
+                    })
+                    .catch(error => {
+                        loadingDiv.innerHTML = `<p style="color: var(--danger-color);">加载失败: ${error.message}</p>`;
+                    });
+            }
+
             // 暴露函数到全局作用域
             window.toggleSettingsModal = toggleSettingsModal;
             window.closeSettingsModal = closeSettingsModal;
             window.openTab = openTab;
             window.saveSettings = saveSettings;
+            window.openMarkdownPreview = openMarkdownPreview;
         });
     </script>
+    
+    <!-- 用于代码高亮的highlight.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
 </body>
 </html>

@@ -13,6 +13,7 @@ from functools import wraps
 import traceback
 import logging
 import config_manager  # 导入配置管理模块
+from markdown_renderer import renderer  # 导入Markdown渲染器
 
 # 配置日志
 logging.basicConfig(
@@ -671,6 +672,68 @@ def view_file(filename):
         return f"无法读取文件: {str(e)}", 500
 
 
+# @app.route('/markdown_viewer')
+# def markdown_viewer():
+#     """Markdown文档查看器主页"""
+#     return render_template('markdown_viewer.html')
+
+
+@app.route('/render_markdown', methods=['POST'])
+def render_markdown():
+    """渲染Markdown内容为HTML"""
+    try:
+        data = request.json
+        markdown_text = data.get('markdown', '')
+        
+        # 使用MarkdownRenderer进行安全渲染
+        rendered_html = renderer.render(markdown_text)
+        
+        return jsonify({
+            'success': True,
+            'html': rendered_html
+        })
+    except Exception as e:
+        temp_task_id = str(uuid.uuid4())
+        log_error(f"渲染Markdown时发生错误 {temp_task_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+#
+# @app.route('/view_doc/<filename>')
+# def view_document(filename):
+#     """查看知识库文档（带Markdown渲染）"""
+#     try:
+#         # 防止路径遍历攻击
+#         file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+#
+#         output_folder_realpath = os.path.realpath(app.config['OUTPUT_FOLDER'])
+#         file_realpath = os.path.realpath(file_path)
+#         if not file_realpath.startswith(output_folder_realpath):
+#             return "非法文件路径", 403
+#
+#         if not os.path.exists(file_path):
+#             return f"文件不存在: {filename}", 404
+#
+#         # 读取文件内容
+#         with open(file_path, 'r', encoding='utf-8') as f:
+#             content = f.read()
+#
+#         # 渲染为HTML
+#         rendered_html = renderer.render(content)
+#
+#         # 渲染到模板中显示
+#         return render_template('markdown_viewer.html',
+#                              content=rendered_html,
+#                              filename=filename,
+#                              title=f"查看文档 - {filename}")
+#     except Exception as e:
+#         temp_task_id = str(uuid.uuid4())
+#         log_error(f"查看文档时发生错误 {temp_task_id} (文件: {filename}): {str(e)}")
+#         return f"查看文档时发生错误: {str(e)}", 500
+
+
 @app.route('/error_logs')
 def get_error_logs():
     """获取错误日志列表"""
@@ -753,4 +816,4 @@ if __name__ == '__main__':
     # os.chdir(application_path)
     
     # 运行应用
-    app.run(debug=False, port=5000)  # 改为端口5000保持一致性
+    app.run(debug=False, port=5002)  # 改为端口5000保持一致性
