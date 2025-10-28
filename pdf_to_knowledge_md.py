@@ -123,6 +123,66 @@ def read_markdown(file_path):
         log_error(f"详细错误信息: {traceback.format_exc()}")
         return None
 
+def read_python_file(file_path):
+    """
+    读取Python代码文件内容，保留代码结构和注释
+    """
+    try:
+        log_info(f"开始读取Python文件: {file_path}")
+        
+        # 使用AST模块解析Python代码获取结构信息
+        import ast
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # 尝试解析代码以验证语法正确性
+        try:
+            tree = ast.parse(content)
+            word_length = len(content.split('\n'))
+            # 提取代码结构信息
+            functions = []
+            classes = []
+            
+            # 遍历AST提取函数和类
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    functions.append(node.name)
+                elif isinstance(node, ast.ClassDef):
+                    classes.append(node.name)
+
+            # 生成代码结构摘要
+            structure_info = f"""
+# Python文件结构摘要
+## 函数列表: {', '.join(functions) if functions else '无'}
+## 类列表: {', '.join(classes) if classes else '无'}
+## 总行数: {word_length}
+## 字符数: {len(content)}
+
+# 原始代码内容:
+"""
+            
+            # 组合结构摘要和原始代码
+            full_content = structure_info + content
+            
+        except SyntaxError:
+            # 如果语法解析失败，仍然返回原始内容但添加警告
+            log_info(f"Python文件 {file_path} 包含语法错误，但仍将处理原始内容")
+            full_content = f"""
+# 警告: 此Python文件包含语法错误
+# 文件名: {os.path.basename(file_path)}
+
+# 原始代码内容:
+""" + content
+        
+        log_info(f"Python文件读取完成，总字符数: {len(full_content)}")
+        return full_content
+    except Exception as e:
+        error_msg = f"读取Python文件时出错: {str(e)}"
+        log_error(error_msg)
+        log_error(f"详细错误信息: {traceback.format_exc()}")
+        return None
+
 def read_ppt(file_path):
     """
     读取PPT文件内容，提取文本和图片
@@ -411,18 +471,19 @@ def call_dashscope_api(api_key, content, user_prompt, config, file_type="pdf"):
     
     # 修复：使用传入的config参数，确保与config_manager保持一致
     
-    # 根据文件类型调整提示词
-    if file_type == "markdown":
-        default_prompt = config.get("default_markdown_prompt", "")
-    elif file_type == "ppt":
-        default_prompt = config.get("default_ppt_prompt", "")
+    # 使用统一的通用提示词处理所有文件类型
+    default_prompt = config.get("default_prompt", "")
+    
+    # 如果是Python文件，可以添加额外的代码分析提示
+    if file_type == "python":
+        python_specific = "\n\n特别注意：如果内容包含代码，请分析代码结构和功能，提取关键组件，总结核心逻辑。"
     else:
-        default_prompt = config.get("default_prompt", "")
+        python_specific = ""
     
     # 如果没有配置提示词，使用空字符串
     default_prompt = default_prompt or ""
     
-    full_prompt = f"{default_prompt}\n\n额外要求: {user_prompt}\n\n内容如下:\n\n{content}"
+    full_prompt = f"{default_prompt}{python_specific}\n\n额外要求: {user_prompt}\n\n内容如下:\n\n{content}"
     
     log_info(f"构建的完整提示词长度: {len(full_prompt)} 字符")
     log_debug(f"完整提示词内容: {full_prompt[:500]}...")  # 只记录前500个字符
@@ -543,39 +604,40 @@ def save_markdown(content, output_path):
 # 使用config_manager模块加载配置，不再使用自定义load_config函数
 
 def main():
+    """
+    主函数：处理命令行参数并调用相应的功能函数
+    """
     try:
         log_info("开始执行PDF转知识库程序")
         
-        parser = argparse.ArgumentParser(description='将PDF、PPT或markdown文件通过大模型API转换为格式化的知识库文档')
-        parser.add_argument('input_path', help='输入文件路径(PDF、PPT或markdown)')
+        parser = argparse.ArgumentParser(description='将PDF、PPT、markdown或Python文件通过大模型API转换为格式化的知识库文档')
+        parser.add_argument('input_files', nargs='*', help='输入文件路径列表(PDF、PPT、markdown或Python)')  # 修改为支持多个文件，使用*使其可选
         parser.add_argument('--prompt', '-p', default='', help='额外的个性化提示词')
         parser.add_argument('--output', '-o', help='输出文件路径')
         parser.add_argument('--api-key', help='DashScope API Key')
         
         args = parser.parse_args()
         
-        log_info(f"输入参数: input_path={args.input_path}, prompt={args.prompt}, output={args.output}")
+        log_info(f"输入参数: input_files={args.input_files}, prompt={args.prompt}, output={args.output}")
         
-        # 检查输入文件是否存在
-        if not os.path.exists(args.input_path):
-            error_msg = f"错误: 输入文件不存在 - {args.input_path}"
+        # 检查是否提供了输入文件
+        if not args.input_files:
+            error_msg = "错误: 请提供至少一个输入文件"
             log_error(error_msg)
+            parser.print_help()
             sys.exit(1)
         
-        # 判断文件类型
-        file_ext = Path(args.input_path).suffix.lower()
-        if file_ext not in ['.pdf', '.md', '.markdown', '.ppt', '.pptx']:
-            error_msg = f"错误: 不支持的文件格式 - {file_ext}. 支持的格式: PDF, MD, MARKDOWN, PPT, PPTX"
-            log_error(error_msg)
-            sys.exit(1)
-        
-        log_info(f"处理文件类型: {file_ext}")
+        # 检查所有输入文件是否存在
+        for input_path in args.input_files:
+            if not os.path.exists(input_path):
+                error_msg = f"错误: 输入文件不存在 - {input_path}"
+                log_error(error_msg)
+                sys.exit(1)
         
         # 加载配置
         config = config_manager.load_config()
         
         # 获取API KEY，优先级：命令行参数 > 配置管理器
-        # 注意：虽然保留了命令行参数支持，但优先使用配置管理器中的配置
         api_key = args.api_key or config.get('api_key', '')
         
         if not api_key:
@@ -585,47 +647,89 @@ def main():
         
         log_info("API KEY已验证")
         
-        # 根据文件类型处理内容
-        if file_ext in ['.pdf']:
-            # PDF处理
-            log_info("开始处理PDF文件...")
-            content = read_pdf(args.input_path)
-            file_type = "pdf"
-        elif file_ext in ['.md', '.markdown']:
-            # Markdown处理
-            log_info("开始处理markdown文件...")
-            content = read_markdown(args.input_path)
-            if content:
-                # 处理markdown中的图片
-                log_info("处理markdown中的图片...")
-                content = process_markdown_with_images(api_key, content, args.input_path, args.prompt, config)
-            file_type = "markdown"
-        elif file_ext in ['.ppt', '.pptx']:
-            # PPT处理
-            log_info("开始处理PPT文件...")
-            content = read_ppt(args.input_path)
-            if content:
-                # 格式化PPT内容为markdown
-                content = format_ppt_content_for_markdown(content)
-                # 处理PPT中的图片
-                log_info("处理PPT中的图片...")
-                content = process_ppt_with_images(api_key, content, args.input_path, args.prompt, config)
-            file_type = "ppt"
+        # 处理多个文件内容
+        all_contents = []
+        total_files = len(args.input_files)
+        has_python_file = False
         
-        if not content:
-            error_msg = "错误: 无法读取文件内容"
+        for i, input_path in enumerate(args.input_files):
+            # 判断文件类型
+            file_ext = Path(input_path).suffix.lower()
+            if file_ext not in ['.pdf', '.md', '.markdown', '.ppt', '.pptx', '.py']:
+                error_msg = f"错误: 不支持的文件格式 - {file_ext}. 支持的格式: PDF, MD, MARKDOWN, PPT, PPTX, PY"
+                log_error(error_msg)
+                sys.exit(1)
+            
+            log_info(f"处理第 {i+1}/{total_files} 个文件: {input_path} (类型: {file_ext})")
+            
+            # 根据文件类型处理内容
+            if file_ext in ['.pdf']:
+                # PDF处理
+                log_info("开始处理PDF文件...")
+                content = read_pdf(input_path)
+                file_type = "pdf"
+            elif file_ext in ['.md', '.markdown']:
+                # Markdown处理
+                log_info("开始处理markdown文件...")
+                content = read_markdown(input_path)
+                if content:
+                    # 处理markdown中的图片
+                    log_info("处理markdown中的图片...")
+                    content = process_markdown_with_images(api_key, content, input_path, args.prompt, config)
+                file_type = "markdown"
+            elif file_ext in ['.ppt', '.pptx']:
+                # PPT处理
+                log_info("开始处理PPT文件...")
+                content = read_ppt(input_path)
+                if content:
+                    # 格式化PPT内容为markdown
+                    content = format_ppt_content_for_markdown(content)
+                    # 处理PPT中的图片
+                    log_info("处理PPT中的图片...")
+                    content = process_ppt_with_images(api_key, content, input_path, args.prompt, config)
+                file_type = "ppt"
+            elif file_ext in ['.py']:
+                # Python代码处理
+                log_info("开始处理Python代码文件...")
+                content = read_python_file(input_path)
+                file_type = "python"
+                has_python_file = True
+            
+            if not content:
+                error_msg = f"错误: 无法读取文件内容 - {input_path}"
+                log_error(error_msg)
+                continue  # 跳过这个文件，继续处理其他文件
+            
+            # 为每个文件内容添加文件名标识
+            file_content_header = f"\n# 文件: {os.path.basename(input_path)}\n\n"
+            all_contents.append(file_content_header + content)
+            
+            log_info(f"文件 {input_path} 内容读取成功，字符数: {len(content)}")
+        
+        # 检查是否有任何内容被成功读取
+        if not all_contents:
+            error_msg = "错误: 没有任何文件内容被成功读取"
             log_error(error_msg)
             sys.exit(1)
         
-        log_info(f"文件内容读取成功，总字符数: {len(content)}")
+        # 合并所有文件内容
+        combined_content = "\n".join(all_contents)
+        
+        log_info(f"所有文件内容合并成功，总字符数: {len(combined_content)}")
         
         # 如果内容过长，进行分段处理提示
-        if len(content) > 30000:  # 模型输入限制调整
+        if len(combined_content) > 30000:  # 模型输入限制调整
             log_info("警告: 内容较长，可能超出API限制，正在发送请求...")
         
+        # 为Python文件添加特殊提示词
+        final_prompt = args.prompt
+        if has_python_file and not args.prompt:
+            python_prompt_suffix = "\n\n特别注意：对于Python代码，请分析代码结构和功能，提取关键组件，总结核心逻辑，解释主要函数和类的作用。"
+            final_prompt = python_prompt_suffix
+        
         # 调用API处理内容
-        log_info("正在调用大模型API处理内容...")
-        result = call_dashscope_api(api_key, content, args.prompt, config, file_type)
+        log_info("正在调用大模型API处理合并内容...")
+        result = call_dashscope_api(api_key, combined_content, final_prompt, config, "multiple_files")
         
         if not result:
             error_msg = "错误: API调用失败，无法生成markdown文档"
@@ -636,18 +740,19 @@ def main():
         if args.output:
             output_path = args.output
         else:
-            # 默认输出路径为输入文件名+processed.md后缀，存放在配置的输出目录
-            # 修复：确保中文文件名正确处理
-            input_name = os.path.splitext(os.path.basename(args.input_path))[0]
+            # 默认输出路径为第一个文件名+timestamp+processed.md后缀，存放在配置的输出目录
+            first_file_name = os.path.splitext(os.path.basename(args.input_files[0]))[0]
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_dir = config.get("output_dir", "./output")
             os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, f"{input_name}_processed.md")
+            output_path = os.path.join(output_dir, f"{first_file_name}_multiple_{timestamp}_processed.md")
         
         log_info(f"输出文件路径: {output_path}")
         
         # 保存结果
         if save_markdown(result, output_path):
-            log_info("处理完成！")
+            log_info("批量处理完成！")
+            print(f"转换完成! 结果已保存到: {output_path}")
         else:
             error_msg = "保存文件失败"
             log_error(error_msg)
@@ -656,6 +761,7 @@ def main():
         error_msg = f"处理过程中发生未捕获的异常: {str(e)}"
         log_error(error_msg)
         log_error(f"详细错误信息: {traceback.format_exc()}")
+        print(f"错误: 处理失败: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":

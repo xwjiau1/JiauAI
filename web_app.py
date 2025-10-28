@@ -41,8 +41,8 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 os.makedirs('.wucai', exist_ok=True)
 
-# 允许的文件扩展名
-ALLOWED_EXTENSIONS = {'pdf', 'md', 'markdown', 'ppt', 'pptx'}
+# 允许上传的文件扩展名
+ALLOWED_EXTENSIONS = {'pdf', 'md', 'markdown', 'ppt', 'pptx', 'py'}
 
 # 任务队列和状态管理
 task_queue = queue.Queue()
@@ -148,8 +148,8 @@ def log_error_detail(task_id, file_path, error_message, error_type="processing_e
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def process_task(task_id, file_path, api_key, prompt, output_path):
-    """处理单个任务的函数"""
+def process_task(task_id, file_paths, api_key, prompt, output_path):
+    """处理单个任务的函数，支持多个文件"""
     global task_status
     
     try:
@@ -168,18 +168,214 @@ def process_task(task_id, file_path, api_key, prompt, output_path):
             if key in env:
                 del env[key]
         
-        # 构建命令
+        # 构建命令 - 针对多文件处理
         cmd = [
             'python', 'pdf_to_knowledge_md.py',
-            file_path,
             '--prompt', prompt,
             '--output', output_path
         ]
+        
+        # 添加所有文件路径到命令
+        for file_path in file_paths:
+            cmd.append(file_path)
         
         # 使用传入的api_key或配置中的api_key
         api_key_to_use = api_key or config.get('api_key', '')
         if api_key_to_use:
             cmd.extend(['--api-key', api_key_to_use])
+        
+        # 更新进度到20%
+        task_status[task_id]['progress'] = 20
+        save_task_status()  # 保存状态到文件
+        
+        # 执行处理 - 使用二进制模式避免编码问题
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            env=env,
+            timeout=600  # 增加超时时间以支持多文件处理
+        )
+        
+        # 更新进度到80%
+        task_status[task_id]['progress'] = 80
+        save_task_status()  # 保存状态到文件
+        
+        # 手动解码输出，使用UTF-8编码并处理可能的解码错误
+        try:
+            stdout_str = result.stdout.decode('utf-8')
+        except UnicodeDecodeError:
+            # 如果UTF-8解码失败，使用系统默认编码并替换错误字符
+            stdout_str = result.stdout.decode('utf-8', errors='replace')
+
+        try:
+            stderr_str = result.stderr.decode('utf-8')
+        except UnicodeDecodeError:
+            # 如果UTF-8解码失败，使用系统默认编码并替换错误字符
+            stderr_str = result.stderr.decode('utf-8', errors='replace')
+
+        if result.returncode == 0:
+            # 处理成功
+            end_time = time.time()
+            processing_duration = end_time - task_status[task_id]['start_time']  # 计算总处理时间（秒）
+            
+            # 获取输出文件的大小（字数）
+            output_length = 0
+            if os.path.exists(output_path):
+                with open(output_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    output_length = len(content)
+                    
+            # 从子进程输出中提取token用量
+            token_usage = 0
+            image_token_usage = 0
+            import re
+            
+            # 检查标准输出中的文本处理token用量
+            token_match = re.search(r'TOKEN_USAGE:(\d+)', stdout_str)
+            if token_match:
+                token_usage = int(token_match.group(1))
+                log_info(f"任务 {task_id} 从子进程输出中提取到文本处理token用量: {token_usage}")
+            else:
+                # 尝试从错误输出中查找（以防万一输出到stderr）
+                token_match = re.search(r'TOKEN_USAGE:(\d+)', stderr_str)
+                if token_match:
+                    token_usage = int(token_match.group(1))
+                    log_info(f"任务 {task_id} 从错误输出中提取到文本处理token用量: {token_usage}")
+                else:
+                    log_info(f"任务 {task_id} 未找到文本处理token用量信息")
+            
+            # 检查标准输出中的图像识别token用量
+            image_token_matches = re.findall(r'IMAGE_TOKEN_USAGE:(\d+)', stdout_str)
+            if image_token_matches:
+                for match in image_token_matches:
+                    image_token_usage += int(match)
+                log_info(f"任务 {task_id} 从子进程输出中提取到图像识别token用量: {image_token_usage}")
+            else:
+                # 尝试从错误输出中查找
+                image_token_matches = re.findall(r'IMAGE_TOKEN_USAGE:(\d+)', stderr_str)
+                if image_token_matches:
+                    for match in image_token_matches:
+                        image_token_usage += int(match)
+                    log_info(f"任务 {task_id} 从错误输出中提取到图像识别token用量: {image_token_usage}")
+            
+            # 计算总token用量
+            total_token_usage = token_usage + image_token_usage
+            log_info(f"任务 {task_id} 总token用量: {total_token_usage} (文本处理: {token_usage} + 图像识别: {image_token_usage})")
+
+            task_status[task_id]['status'] = 'completed'
+            task_status[task_id]['progress'] = 100
+            # 将处理时间和输出字数作为顶级字段，方便前端访问
+            task_status[task_id]['processing_time'] = processing_duration  # 以秒为单位的处理时间
+            task_status[task_id]['output_length'] = output_length  # 输出字数
+            task_status[task_id]['token_usage'] = total_token_usage  # 设置实际的总token用量
+            task_status[task_id]['image_token_usage'] = image_token_usage  # 记录图像识别token用量
+            
+            task_status[task_id]['result'] = {
+                'output_file': os.path.basename(output_path),
+                'message': '处理成功',
+                'processing_time': processing_duration,  # 以秒为单位的处理时间
+                'output_length': output_length,  # 输出字数
+                'token_usage': total_token_usage,  # 使用实际计算的总token用量
+                'image_token_usage': image_token_usage  # 记录图像识别token用量
+            }
+            save_task_status()  # 保存状态到文件
+            
+            # 保存处理记录
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 构建输入文件描述
+            input_file_desc = ', '.join(task_status[task_id]['input_filenames'])
+            
+            record = {
+                'task_id': task_id,
+                'input_file': input_file_desc,  # 显示多个文件名
+                'unique_input_files': [os.path.basename(fp) for fp in file_paths],  # 内部存储的安全文件名列表
+                'output_file': os.path.basename(output_path),  # 包含原始文件名的输出文件名
+                'prompt': prompt,
+                'timestamp': timestamp,
+                'processing_time': task_status[task_id]['start_time'],  # 任务开始的Unix时间戳
+                'duration_seconds': processing_duration,  # 处理耗时（秒）
+                'status': 'completed',
+                'output_length': output_length,  # 输出字数
+                'token_usage': total_token_usage,  # 使用总token用量
+                'image_token_usage': image_token_usage  # 添加图像识别token用量记录
+            }
+            
+            # 保存到JSON记录文件
+            records_file = os.path.join('.wucai', 'processing_records.json')
+            records = []
+            if os.path.exists(records_file):
+                try:
+                    with open(records_file, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content:  # 检查文件内容是否为空
+                            records = json.loads(content)
+                        else:
+                            records = []  # 空文件则初始化为空列表
+                except (json.JSONDecodeError, FileNotFoundError):
+                    records = []  # 如果解析失败或文件不存在，初始化为空列表
+            
+            records.append(record)
+            
+            with open(records_file, 'w', encoding='utf-8') as f:
+                json.dump(records, f, ensure_ascii=False, indent=2)
+                
+        else:
+            # 处理失败 - 现在能更好地捕获子进程错误
+            task_status[task_id]['status'] = 'failed'
+            task_status[task_id]['error'] = stderr_str
+            task_status[task_id]['progress'] = 100
+            task_status[task_id]['result'] = {
+                'message': f'处理失败: {stderr_str}'
+            }
+            save_task_status()  # 保存状态到文件
+            
+            # 记录错误日志 - 现在会记录到全局错误日志
+            log_error(f"任务 {task_id} 错误: {stderr_str}")
+            # 同时记录到详细错误日志文件
+            log_error_detail(task_id, ', '.join(file_paths), f"处理失败: {stderr_str}", "processing_error")
+
+        task_status[task_id]['end_time'] = time.time()
+        save_task_status()  # 保存状态到文件
+        
+    except subprocess.TimeoutExpired:
+        # 处理超时
+        task_status[task_id]['status'] = 'failed'
+        task_status[task_id]['error'] = "处理超时 (超过10分钟)"
+        task_status[task_id]['progress'] = 100
+        task_status[task_id]['result'] = {
+            'message': '处理超时: 任务执行时间超过10分钟'
+        }
+        save_task_status()  # 保存状态到文件
+        
+        # 记录错误日志
+        log_error(f"任务 {task_id} 超时错误: 处理超时 (超过10分钟)")
+        # 同时记录到详细错误日志文件
+        log_error_detail(task_id, ', '.join(file_paths), "处理超时 (超过10分钟)", "timeout_error")
+        
+        task_status[task_id]['end_time'] = time.time()
+        save_task_status()  # 保存状态到文件
+        
+    except Exception as e:
+        # 处理异常
+        task_status[task_id]['status'] = 'failed'
+        task_status[task_id]['error'] = str(e)
+        task_status[task_id]['progress'] = 100
+        task_status[task_id]['result'] = {
+            'message': f'处理过程中发生错误: {str(e)}'
+        }
+        save_task_status()  # 保存状态到文件
+        
+        # 记录错误日志
+        log_error(f"任务 {task_id} 异常: {str(e)}")
+        # 同时记录到详细错误日志文件
+        log_error_detail(task_id, ', '.join(file_paths), str(e), "processing_exception")
+        
+        task_status[task_id]['end_time'] = time.time()
+        save_task_status()  # 保存状态到文件
+        
+        task_status[task_id]['end_time'] = time.time()
+        save_task_status()  # 保存状态到文件
         
         # 更新进度到20%
         task_status[task_id]['progress'] = 20
@@ -376,7 +572,7 @@ def task_worker():
                 break
             
             task_id = task_data['task_id']
-            file_path = task_data['file_path']
+            file_paths = task_data['file_paths']  # 修改为file_paths以支持多个文件
             api_key = task_data['api_key']  # 修改为api_key以符合命名规范
             prompt = task_data['prompt']
             output_path = task_data['output_path']
@@ -384,10 +580,10 @@ def task_worker():
             # 启动处理线程
             processing_thread = threading.Thread(
                 target=process_task,
-                args=(task_id, file_path, api_key, prompt, output_path)
+                args=(task_id, file_paths, api_key, prompt, output_path)
             )
             processing_thread.start()
-            
+                
             task_queue.task_done()
         except queue.Empty:
             continue
@@ -409,13 +605,15 @@ def upload_file():
         # 检查是否有文件在请求中
         if 'file' not in request.files:
             return jsonify({'error': '没有文件'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
+            
+        files = request.files.getlist('file')
+        if not files or all(file.filename == '' for file in files):
             return jsonify({'error': '没有选择文件'}), 400
         
-        if not allowed_file(file.filename):
-            return jsonify({'error': '不支持的文件格式'}), 400
+        # 检查是否有不支持的文件格式
+        for file in files:
+            if file.filename != '' and not allowed_file(file.filename):
+                return jsonify({'error': f'不支持的文件格式: {file.filename}'}), 400
         
         # 获取提示词参数
         prompt = request.form.get('prompt', '')
@@ -434,31 +632,49 @@ def upload_file():
         task_id = str(uuid.uuid4())
         
         # 保存上传的文件
-        original_filename = file.filename  # 保存原始文件名（包含中文）
-        # 提取文件扩展名
-        _, file_ext = os.path.splitext(original_filename)
-        # 使用task_id作为基础文件名，正确添加扩展名
-        secure_unique_filename = f"{task_id}{file_ext.lower()}"  # 存储时使用安全文件名，保持扩展名格式
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_unique_filename)
-        file.save(file_path)
+        file_paths = []
+        original_filenames = []
+        
+        for file in files:
+            if file.filename != '':  # 只处理非空文件
+                original_filename = file.filename  # 保存原始文件名（包含中文）
+                original_filenames.append(original_filename)
+                
+                # 提取文件扩展名
+                _, file_ext = os.path.splitext(original_filename)
+                # 使用task_id和索引作为基础文件名，正确添加扩展名
+                secure_unique_filename = f"{task_id}_{len(file_paths)}{file_ext.lower()}"  # 存储时使用安全文件名，保持扩展名格式
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_unique_filename)
+                file.save(file_path)
+                file_paths.append(file_path)
+        
+        # 检查是否成功上传了任何文件
+        if not file_paths:
+            return jsonify({'error': '没有有效的文件被上传'}), 400
         
         # 构建输出文件路径 - 使用原始文件名（保留中文）来构建输出文件名
-        input_name_without_ext = os.path.splitext(original_filename)[0]
-        output_filename = f"{input_name_without_ext}_processed.md"
+        # 如果有多个文件，输出文件名为"multiple_files_时间戳.md"
+        if len(original_filenames) == 1:
+            input_name_without_ext = os.path.splitext(original_filenames[0])[0]
+            output_filename = f"{input_name_without_ext}_processed.md"
+        else:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_filename = f"multiple_files_{timestamp}.md"
+        
         output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
         
         # 记录任务开始时间
         start_time = time.time()
         
         # 从配置中心读取模型信息
-        text_model = config.get('text_model', 'qwen-max')
+        text_model = config.get('text_model', 'qwen-plus')
         image_model = config.get('image_model', 'qwen-vl-plus')
         
         # 初始化任务状态
         task_status[task_id] = {
             'status': 'pending',
             'progress': 0,
-            'input_filename': original_filename,  # 存储原始完整文件名
+            'input_filenames': original_filenames,  # 存储原始完整文件名列表
             'start_time': start_time,
             'end_time': None,
             'result': None,
@@ -471,7 +687,7 @@ def upload_file():
         # 添加任务到队列
         task_data = {
             'task_id': task_id,
-            'file_path': file_path,
+            'file_paths': file_paths,  # 修改为file_paths以支持多个文件
             'api_key': api_key,  # 修改为api_key以符合命名规范
             'prompt': prompt,
             'output_path': output_path
@@ -482,8 +698,8 @@ def upload_file():
         return jsonify({
             'success': True,
             'task_id': task_id,
-            'message': '任务已提交，正在后台处理',
-            'original_filename': original_filename  # 返回原始文件名供前端使用
+            'message': f'任务已提交，正在后台处理 {len(file_paths)} 个文件',
+            'original_filenames': original_filenames  # 返回原始文件名供前端使用
         })
     except Exception as e:
         # 记录异常
@@ -777,6 +993,53 @@ def download_error_log():
         temp_task_id = str(uuid.uuid4())
         log_error(f"下载错误日志时发生错误 {temp_task_id}: {str(e)}")
         return f"下载错误日志时发生错误: {str(e)}", 500
+
+@app.route('/delete_document/<filename>', methods=['DELETE'])
+def delete_document(filename):
+    """删除知识库文档
+    从output目录删除文件，并从知识库列表中移除记录，但保留任务记录
+    """
+    try:
+        # 防止路径遍历攻击
+        file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+        output_folder_realpath = os.path.realpath(app.config['OUTPUT_FOLDER'])
+        file_realpath = os.path.realpath(file_path)
+        
+        if not file_realpath.startswith(output_folder_realpath):
+            return jsonify({'success': False, 'error': '非法文件路径'}), 403
+        
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            return jsonify({'success': False, 'error': '文件不存在'}), 404
+        
+        # 从processing_records.json中移除对应的记录
+        records_file = os.path.join('.wucai', 'processing_records.json')
+        records = []
+        if os.path.exists(records_file):
+            with open(records_file, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                if content:  # 检查文件内容是否为空
+                    records = json.loads(content)
+                else:
+                    records = []  # 空文件则初始化为空列表
+        
+        # 过滤掉要删除的文件记录
+        # 注意：我们仍然保留任务记录，只是从知识库列表中移除
+        filtered_records = [record for record in records if record.get('output_file') != filename]
+        
+        # 保存更新后的记录
+        with open(records_file, 'w', encoding='utf-8') as f:
+            json.dump(filtered_records, f, ensure_ascii=False, indent=2)
+        
+        # 删除物理文件
+        os.remove(file_path)
+        
+        log_info(f"成功删除文档: {filename}")
+        return jsonify({'success': True, 'message': '文档删除成功'})
+    except Exception as e:
+        temp_task_id = str(uuid.uuid4())
+        log_error(f"删除文档时发生错误 {temp_task_id} (文件: {filename}): {str(e)}")
+        return jsonify({'success': False, 'error': f'删除失败: {str(e)}'}), 500
 
 
 @app.errorhandler(500)

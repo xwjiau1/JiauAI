@@ -13,8 +13,10 @@ CONFIG_FILE = os.path.join('.wucai', 'config.json')
 # 修复：确保所有配置都从小球配置中心读取，不使用默认值
 DEFAULT_CONFIG = {
     'api_key': '',
-    'text_model': '',
-    'image_model': '', 
+    'text_model': 'qwen-plus',
+    'image_model': 'qwen-vl-plus',
+    'default_prompt': '请基于提供的内容，生成一份结构化、易于理解的知识库文档。文档应包含清晰的标题、目录和正文内容，使用适当的markdown格式（标题、列表、表格等）进行排版。对于不同类型的内容：\n1. 文本内容：提取核心概念、关键信息和重要结论\n2. 代码内容：分析代码结构和功能，识别关键组件和核心逻辑\n3. 图表内容：说明图表展示的主要信息和结论\n\n请以专业、简洁的语言组织内容，确保文档逻辑清晰、重点突出，并适合后续查阅和使用。',
+    'output_dir': './output',
     'last_updated': ''
 }
 
