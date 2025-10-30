@@ -12,6 +12,8 @@ import tempfile
 from datetime import datetime
 import traceback
 import logging
+# 图像处理库
+from PIL import Image
 
 # 导入配置管理器
 import config_manager
@@ -182,6 +184,180 @@ def read_python_file(file_path):
         log_error(error_msg)
         log_error(f"详细错误信息: {traceback.format_exc()}")
         return None
+
+def compress_image(image_path, max_size_mb=5, quality=95):
+    """
+    压缩图像文件以减小大小但保持质量，特别优化文字清晰度
+    
+    压缩机制说明：
+    1. 先尝试仅通过调整JPEG/PNG压缩质量进行无损或近无损压缩
+    2. 仅当质量压缩后仍超限时，才考虑降低分辨率
+    3. 使用LANCZOS重采样算法保证文字边缘清晰
+    4. 对文字内容优先保持水平和垂直分辨率
+    
+    Args:
+        image_path: 原始图像路径
+        max_size_mb: 最大文件大小（MB）
+        quality: 压缩质量 (0-100)，默认95保持较高质量
+    
+    Returns:
+        str: 压缩后的临时图像路径，如果不需要压缩则返回原路径
+    """
+    import os
+    from PIL import Image, ImageFilter
+    import tempfile
+    
+    # 检查文件大小
+    file_size_mb = os.path.getsize(image_path) / (1024 * 1024)
+    log_info(f"原始图像大小: {file_size_mb:.2f}MB")
+    
+    # 如果文件大小在限制内，直接返回原路径
+    if file_size_mb <= max_size_mb:
+        log_info(f"图像大小在限制范围内，无需压缩")
+        return image_path
+    
+    log_info(f"图像大小超过限制，开始优化压缩...")
+    
+    try:
+        # 创建临时文件
+        file_ext = os.path.splitext(image_path)[1]
+        temp_fd, temp_path = tempfile.mkstemp(suffix=file_ext)
+        os.close(temp_fd)
+        
+        # 打开图像
+        with Image.open(image_path) as img:
+            width, height = img.size
+            original_format = img.format
+            
+            # 第一步：先尝试无损或近无损压缩，不改变分辨率
+            img.save(temp_path, format=original_format, quality=quality, optimize=True)
+            compressed_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+            
+            if compressed_size_mb <= max_size_mb:
+                log_info(f"仅通过调整压缩质量完成优化: {file_size_mb:.2f}MB → {compressed_size_mb:.2f}MB，保持原始分辨率 {width}x{height}")
+                return temp_path
+            
+            # 第二步：如果质量压缩后仍超限，尝试降低分辨率
+            # 对于可能包含文字的图像，优先考虑更高的质量设置
+            target_size_mb = max_size_mb * 0.9  # 留出余量
+            
+            # 计算目标分辨率，基于文件大小比例的平方根，这样可以保持宽高比
+            size_ratio = (target_size_mb / compressed_size_mb) ** 0.5
+            # 对于文字内容，不要过度降低分辨率
+            min_ratio = 0.5  # 至少保持50%的原始分辨率
+            ratio = max(size_ratio, min_ratio)
+            
+            new_width = int(width * ratio)
+            new_height = int(height * ratio)
+            
+            # 确保分辨率不会过高或过低
+            max_dimension = 3000  # 最大允许分辨率
+            min_dimension = 800    # 最小允许分辨率（保证文字可读性）
+            
+            new_width = max(min(new_width, max_dimension), min_dimension)
+            new_height = max(min(new_height, max_dimension), min_dimension)
+            
+            log_info(f"需要调整分辨率: 从 {width}x{height} 到 {new_width}x{new_height}，保持质量设置为 {quality}")
+            
+            # 使用LANCZOS算法（最高质量）进行重采样，特别适合保持文字清晰度
+            resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # 对于JPEG格式，添加少量锐化以保持文字边缘清晰
+            if original_format == 'JPEG':
+                resized_img = resized_img.filter(ImageFilter.SHARPEN)
+            
+            # 保存压缩后的图像
+            # 对于可能包含文字的图像，优先考虑PNG格式以获得更好的文字清晰度
+            if original_format in ['JPEG', 'JPG'] and compressed_size_mb > 2:  # 如果JPEG压缩不够好，尝试PNG
+                try:
+                    resized_img.save(temp_path, format='PNG', optimize=True)
+                    png_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+                    if png_size_mb <= max_size_mb:
+                        log_info(f"已转换为PNG格式以优化文字清晰度: {file_size_mb:.2f}MB → {png_size_mb:.2f}MB")
+                        return temp_path
+                except Exception as png_error:
+                    log_info(f"PNG转换失败，继续使用原格式: {str(png_error)}")
+            
+            # 使用原格式保存
+            resized_img.save(temp_path, format=original_format, quality=quality, optimize=True)
+            
+            # 检查最终压缩后的大小
+            final_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+            log_info(f"图像压缩完成: {file_size_mb:.2f}MB → {final_size_mb:.2f}MB，分辨率: {new_width}x{new_height}")
+            
+            return temp_path
+    except Exception as e:
+        log_error(f"压缩图像时出错: {str(e)}")
+        # 如果压缩失败，尝试使用原图
+        return image_path
+
+def read_image_file(file_path, api_key):
+    """
+    读取图像文件并使用DashScope API进行识别
+    """
+    import os
+    log_info(f"开始处理图像文件: {file_path}")
+    temp_compressed_path = None
+    
+    try:
+        # 先压缩图像以避免文件过大
+        temp_compressed_path = compress_image(file_path)
+        
+        # 使用recognize_image_with_dashscope函数识别图像
+        description = recognize_image_with_dashscope(
+            api_key,
+            temp_compressed_path,
+            "请详细描述这张图片的内容，包括其中的关键信息、文字、数据、图表、表格或其他重要元素。如果图片包含文字，请尽可能准确地提取，图像可能不清晰，帮我推断一下主题和提炼图片所包含的主要信息。"
+        )
+        
+        if description:
+            # 构建markdown格式的图像识别结果
+            file_name = os.path.basename(file_path)
+            image_content = f"# 图像识别结果: {file_name}\n\n"
+            image_content += f"## 图像基本信息\n\n"
+            image_content += f"- **文件名**: {file_name}\n"
+            
+            # 获取图像尺寸信息
+            try:
+                from PIL import Image
+                with Image.open(file_path) as img:
+                    width, height = img.size
+                    image_content += f"- **尺寸**: {width} x {height} 像素\n"
+                    image_content += f"- **格式**: {img.format}\n"
+                    
+                    # 获取文件大小
+                    file_size = os.path.getsize(file_path)
+                    image_content += f"- **文件大小**: {file_size/1024:.2f} KB\n"
+            except Exception as img_info_error:
+                log_error(f"获取图像信息时出错: {str(img_info_error)}")
+                image_content += "- **尺寸**: 无法获取\n"
+                image_content += "- **格式**: 无法获取\n"
+                
+            image_content += "\n## 图像内容描述\n\n"
+            image_content += description
+            
+            # 添加图像引用（在markdown中显示图像）
+            image_content += f"\n\n## 原始图像\n\n!['{file_name}']({file_path})"
+            
+            log_info(f"图像文件处理成功，识别完成")
+            return image_content
+        else:
+            log_error(f"图像识别失败: {file_path}")
+            return None
+    except Exception as e:
+        error_msg = f"处理图像文件时出错: {str(e)}"
+        log_error(error_msg)
+        log_error(f"详细错误信息: {traceback.format_exc()}")
+        return None
+    finally:
+        # 清理临时压缩文件
+        if temp_compressed_path and temp_compressed_path != file_path:
+            try:
+                if os.path.exists(temp_compressed_path):
+                    os.remove(temp_compressed_path)
+                    log_info(f"已清理临时压缩文件: {temp_compressed_path}")
+            except Exception as cleanup_error:
+                log_error(f"清理临时文件时出错: {str(cleanup_error)}")
 
 def read_ppt(file_path):
     """
@@ -364,30 +540,58 @@ def recognize_image_with_dashscope(api_key, image_path, custom_prompt="请详细
             log_debug(f"API响应内容: {result}")
             
             # 提取并统计token用量
-            image_tokens = 0
+            image_token_usage = 0
             if hasattr(response, 'usage') and response.usage:
                 input_tokens = response.usage.get('input_tokens', 0)
                 output_tokens = response.usage.get('output_tokens', 0)
-                image_tokens = input_tokens + output_tokens
-                log_info(f"图片识别Token用量统计: 输入{input_tokens} + 输出{output_tokens} = 总计{image_tokens}")
+                total_tokens = input_tokens + output_tokens
+                image_token_usage = total_tokens
+                log_info(f"图片识别Token用量统计: 输入{input_tokens} + 输出{output_tokens} = 总计{total_tokens}")
             else:
                 log_info("未在图像识别API响应中找到token用量信息")
             
-            # 输出图片识别的token用量，以便累加统计
-            print(f"IMAGE_TOKEN_USAGE:{image_tokens}")
+            # 输出图片识别的token用量，以便web_app.py能够捕获和记录
+            print(f"IMAGE_TOKEN_USAGE:{image_token_usage}")
             
             # 处理返回的多模态内容
             if isinstance(result, list):
+                # 尝试从列表中提取文本内容
                 for item in result:
-                    if item.get('type') == 'text':
-                        log_info(f"图片识别结果(文本): {item.get('text', '')[:100]}...")  # 只记录前100个字符
-                        return item.get('text', '')
+                    if isinstance(item, dict):
+                        # 检查是否有text字段
+                        if 'text' in item:
+                            log_info(f"图片识别结果(文本): {item.get('text', '')[:100]}...")  # 只记录前100个字符
+                            return item.get('text', '')
+                        # 尝试直接获取文本（不通过type检查）
+                        elif 'content' in item:
+                            log_info(f"图片识别结果(内容): {item.get('content', '')[:100]}...")  # 只记录前100个字符
+                            return item.get('content', '')
+                # 如果列表中没有找到有效文本，尝试将整个列表转为字符串
+                result_str = str(result)
+                log_info(f"图片识别结果(列表转换): {result_str[:100]}...")
+                return result_str
+            elif isinstance(result, dict):
+                # 如果是字典，直接提取其中的文本内容
+                if 'text' in result:
+                    log_info(f"图片识别结果(字典文本): {result.get('text', '')[:100]}...")
+                    return result.get('text', '')
+                # 尝试其他可能的字段名
+                elif 'content' in result:
+                    log_info(f"图片识别结果(字典内容): {result.get('content', '')[:100]}...")
+                    return result.get('content', '')
+                else:
+                    # 将字典转为字符串
+                    result_str = str(result)
+                    log_info(f"图片识别结果(字典转换): {result_str[:100]}...")
+                    return result_str
             elif isinstance(result, str):
-                log_info(f"图片识别结果: {result[:100]}...")  # 只记录前100个字符
+                # 如果直接是字符串，直接返回
+                log_info(f"图片识别结果(直接字符串): {result[:100]}...")
                 return result
             else:
+                # 其他类型转为字符串
                 result_str = str(result)
-                log_info(f"图片识别结果: {result_str[:100]}...")  # 只记录前100个字符
+                log_info(f"图片识别结果(其他类型转换): {result_str[:100]}...")
                 return result_str
         else:
             error_msg = f"图像识别API调用失败: {response.code} - {response.message}"
@@ -651,12 +855,13 @@ def main():
         all_contents = []
         total_files = len(args.input_files)
         has_python_file = False
+        has_image_file = False
         
         for i, input_path in enumerate(args.input_files):
             # 判断文件类型
             file_ext = Path(input_path).suffix.lower()
-            if file_ext not in ['.pdf', '.md', '.markdown', '.ppt', '.pptx', '.py']:
-                error_msg = f"错误: 不支持的文件格式 - {file_ext}. 支持的格式: PDF, MD, MARKDOWN, PPT, PPTX, PY"
+            if file_ext not in ['.pdf', '.md', '.markdown', '.ppt', '.pptx', '.py', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']:
+                error_msg = f"错误: 不支持的文件格式 - {file_ext}. 支持的格式: PDF, MD, MARKDOWN, PPT, PPTX, PY, JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP"
                 log_error(error_msg)
                 sys.exit(1)
             
@@ -694,12 +899,29 @@ def main():
                 content = read_python_file(input_path)
                 file_type = "python"
                 has_python_file = True
+            elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']:
+                # 图像文件处理
+                log_info("开始处理图像文件...")
+                content = read_image_file(input_path, api_key)
+                file_type = "image"
+                has_image_file = True
             
             if not content:
-                error_msg = f"错误: 无法读取文件内容 - {input_path}"
+                # # 对于图像文件，如果识别失败，直接结束任务
+                # if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']:
+                #     error_msg = f"错误: 图像识别失败，任务直接结束 - {input_path}"
+                #     log_error(error_msg)
+                #     print(f"IMAGE_RECOGNITION_FAILED")  # 输出特殊标记供web_app.py捕获
+                #     sys.exit(1)
+                # else:
+                #     # 对于非图像文件，仍然跳过当前文件继续处理
+                #     error_msg = f"错误: 无法读取文件内容 - {input_path}"
+                #     log_error(error_msg)
+                #     continue  # 跳过这个文件，继续处理其他文件
+                error_msg = f"错误: 图像识别失败，任务直接结束 - {input_path}"
                 log_error(error_msg)
-                continue  # 跳过这个文件，继续处理其他文件
-            
+                print(f"IMAGE_RECOGNITION_FAILED")  # 输出特殊标记供web_app.py捕获
+                sys.exit(1)
             # 为每个文件内容添加文件名标识
             file_content_header = f"\n# 文件: {os.path.basename(input_path)}\n\n"
             all_contents.append(file_content_header + content)
@@ -721,11 +943,21 @@ def main():
         if len(combined_content) > 30000:  # 模型输入限制调整
             log_info("警告: 内容较长，可能超出API限制，正在发送请求...")
         
-        # 为Python文件添加特殊提示词
+        # 为Python文件和图像文件添加特殊提示词
         final_prompt = args.prompt
+        
+        # 如果有Python文件且用户未提供提示词，添加Python相关提示
         if has_python_file and not args.prompt:
             python_prompt_suffix = "\n\n特别注意：对于Python代码，请分析代码结构和功能，提取关键组件，总结核心逻辑，解释主要函数和类的作用。"
             final_prompt = python_prompt_suffix
+        
+        # 如果有图像文件，添加图像处理相关提示
+        if has_image_file:
+            image_prompt_suffix = "\n\n对于图像识别结果，请确保详细总结图像中的所有关键信息，包括文本内容、图表数据、视觉元素等。如果有多张图像，请分别详细分析每张图像的内容。"
+            if final_prompt:
+                final_prompt += image_prompt_suffix
+            else:
+                final_prompt = image_prompt_suffix
         
         # 调用API处理内容
         log_info("正在调用大模型API处理合并内容...")

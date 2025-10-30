@@ -62,6 +62,19 @@
 - **处理逻辑**: 识别Python文件类型，添加特殊标记后与其他文件内容合并统一处理
 - **适用场景**: 需要将代码文档转换为知识库格式的场景
 
+#### 2.1.8 图像文件识别与处理
+- **功能描述**: 支持直接上传图像文件（JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP）并进行内容识别
+- **输入**: 图像文件路径
+- **处理逻辑**: 使用DashScope视觉模型对图像进行分析和描述，生成结构化的文字内容
+- **处理流程**: 
+  1. 检测上传的文件是否为支持的图像格式
+  2. 调用read_image函数读取图像文件路径
+  3. 使用recognize_image_with_dashscope函数调用DashScope视觉模型API进行内容识别
+  4. 将识别结果组织成结构化的markdown格式
+  5. 与其他文件内容合并后统一进行知识库转化
+- **输出格式**: 包含图像文件名和详细识别描述的markdown文档
+- **支持格式**: JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP
+
 ### 2.2 图形界面功能
 
 #### 2.2.1 文件上传界面
@@ -142,8 +155,8 @@
 ### 2.4 辅助功能
 
 #### 2.4.1 多格式支持
-- **功能描述**: 支持处理PDF、PPT、markdown和Python格式文件
-- **支持格式**: PDF(.pdf), PPT(.ppt, .pptx), Markdown(.md, .markdown), Python(.py)
+- **功能描述**: 支持处理PDF、PPT、markdown、Python和图像格式文件
+- **支持格式**: PDF(.pdf), PPT(.ppt, .pptx), Markdown(.md, .markdown), Python(.py), 图像(JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP), 图像(JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP)
 
 #### 2.4.2 批量处理
 - **功能描述**: 支持批量处理多个文档
@@ -160,9 +173,10 @@
 - **后端功能**:
   - 更新`/upload`接口支持多文件接收
   - 修改任务处理逻辑支持多文件路径列表
-  - 根据文件类型分别处理（PDF、PPT、markdown、Python）
+  - 根据文件类型分别处理（PDF、PPT、markdown、Python、图像）
+  - 对图像文件使用视觉模型进行内容识别
   - 合并识别内容后统一进行知识库转化
-- **文件类型支持**: PDF(.pdf), PPT(.ppt, .pptx), Markdown(.md, .markdown), Python(.py)
+- **文件类型支持**: PDF(.pdf), PPT(.ppt, .pptx), Markdown(.md, .markdown), Python(.py), 图像(JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP)
 - **单文件大小限制**: 200MB
 
 #### 2.4.3 配置管理
@@ -252,7 +266,7 @@ Web应用地址: `http://localhost:5000`
 
 #### 4.1.2 主功能页面
 - 文件上传区域 (支持拖拽和点击选择)
-- 支持格式: PDF, MD, MARKDOWN, PPT, PPTX, PY
+- 支持格式: PDF, MD, MARKDOWN, PPT, PPTX, PY, JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP
 - App Key输入框 (密码类型，带显示/隐藏切换)
 - 个性化Prompt文本框
 - 提交转换任务按钮
@@ -290,6 +304,7 @@ python pdf_to_knowledge_md.py [OPTIONS] input_path
 - PPT文件: .ppt, .pptx
 - Markdown文件: .md, .markdown
 - Python文件: .py
+- 图像文件: .jpg, .jpeg, .png, .gif, .bmp, .tiff, .webp
 
 ## 5. 配置管理
 
@@ -352,7 +367,7 @@ python web_app.py
 
 ```
 F:\wucai\20251015\
-├── pdf_to_knowledge_md.py    # 主程序文件，支持PDF、PPT、markdown、Python处理
+├── pdf_to_knowledge_md.py    # 主程序文件，支持PDF、PPT、markdown、Python、图像处理
 ├── web_app.py                # Web应用主文件(含异步任务处理)
 ├── markdown_renderer.py      # Markdown渲染和安全过滤
 ├── config_manager.py         # 配置管理模块
@@ -415,4 +430,5 @@ F:\wucai\20251015\
 | 1.7.0 | 2025-10-23 | - 重构前端布局：采用侧边栏导航的现代化布局设计<br>- 新增页面结构：实现主功能、任务管理、知识库独立页面<br>- 优化用户体验：改进界面布局、交互逻辑和视觉效果<br>- 增强响应式设计：适配不同设备的显示需求 | Wucai AI |
 | 1.8.0 | 2025-10-26 | - 新增知识库文档在线查看功能：支持Markdown格式文档的在线渲染和查看<br>- 实现安全的Markdown解析：使用markdown2和bleach库防止XSS攻击<br>- 添加代码高亮功能：集成highlight.js库支持代码块高亮显示<br>- 创建独立查看器页面：提供专门的Markdown文档查看界面<br>- 增强文档管理：支持从知识库选择文档并在线查看 | Wucai AI |
 | 1.9.0 | 2025-10-27 | - 新增批量上传功能：支持用户一次性选择和上传多个文件<br>- 多文件类型支持：系统根据文件类型分别进行识别处理<br>- 智能合并处理：将多个文件的识别内容合并后统一上传给LLM进行知识库转化<br>- 前端优化：添加多文件选择、拖拽上传、文件列表预览功能<br>- 后端增强：更新API支持多文件接收和任务处理逻辑<br>- 任务管理改进：支持显示批量处理任务的详细信息 | Wucai AI |
-| 1.10.0 | 2025-10-28 | - 新增知识库文档删除功能：支持从知识库列表中删除文档记录<br>- 物理文件删除：从系统中删除对应的文档文件<br>- 保留任务记录：删除操作仅移除知识库显示，保留处理历史记录以便追溯<br>- 安全措施：实现路径验证，防止路径遍历攻击<br>- 错误处理：添加完善的错误处理和日志记录机制 | Wucai AI |
+| 1.10.0 | 2025-10-28 | - 新增知识库文档删除功能<br>- 添加删除确认机制<br>- 优化文件路径安全检查<br>- 改进处理记录管理 | Wucai AI |
+| 2.0.0 | 2025-10-30 | - 新增图像文件处理功能：支持直接上传并处理图像文件<br>- 实现图像内容识别：使用DashScope视觉模型识别图像内容<br>- 扩展文件格式支持：添加JPG, JPEG, PNG, GIF, BMP, TIFF, WEBP格式支持<br>- 前端界面更新：支持图像文件上传和预览<br>- 后端逻辑增强：实现图像处理和内容整合功能 | Wucai AI |

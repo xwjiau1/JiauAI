@@ -33,7 +33,7 @@ def log_error(message):
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['OUTPUT_FOLDER'] = 'output'
-app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB max file size，提高限制以支持更大的PPT文件
+app.config['MAX_CONTENT_LENGTH'] = 5000 * 1024 * 1024  # 500MB max file size，大幅提高限制以支持批量文件上传
 CORS(app)  # 启用CORS支持，允许跨域请求
 
 # 确保目录存在
@@ -42,7 +42,7 @@ os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 os.makedirs('.wucai', exist_ok=True)
 
 # 允许上传的文件扩展名
-ALLOWED_EXTENSIONS = {'pdf', 'md', 'markdown', 'ppt', 'pptx', 'py'}
+ALLOWED_EXTENSIONS = {'pdf', 'md', 'markdown', 'ppt', 'pptx', 'py', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp'}
 
 # 任务队列和状态管理
 task_queue = queue.Queue()
@@ -460,22 +460,73 @@ def upload_file():
         # 生成任务ID
         task_id = str(uuid.uuid4())
         
-        # 保存上传的文件
+        # 保存上传的文件（优化内存使用）
         file_paths = []
         original_filenames = []
         
-        for file in files:
-            if file.filename != '':  # 只处理非空文件
-                original_filename = file.filename  # 保存原始文件名（包含中文）
-                original_filenames.append(original_filename)
-                
-                # 提取文件扩展名
-                _, file_ext = os.path.splitext(original_filename)
-                # 使用task_id和索引作为基础文件名，正确添加扩展名
-                secure_unique_filename = f"{task_id}_{len(file_paths)}{file_ext.lower()}"  # 存储时使用安全文件名，保持扩展名格式
-                file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_unique_filename)
-                file.save(file_path)
-                file_paths.append(file_path)
+        # 分批处理文件以减少内存占用
+        BATCH_SIZE = 10  # 每批处理10个文件
+        
+        # 记录任务开始时间
+        start_time = time.time()
+        
+        # 从配置中心读取模型信息
+        text_model = config.get('text_model', 'qwen-plus')
+        image_model = config.get('image_model', 'qwen-vl-plus')
+        
+        # 初始化任务状态
+        task_status[task_id] = {
+            'status': 'pending',
+            'progress': 0,
+            'input_filenames': [],  # 稍后填充所有文件名
+            'start_time': start_time,
+            'end_time': None,
+            'result': None,
+            'error': None,
+            'text_model': text_model,
+            'image_model': image_model
+        }
+        save_task_status()  # 保存状态到文件
+        
+        # 批量保存文件，减少内存占用
+        log_info(f"开始保存 {len(files)} 个上传文件...")
+        
+        try:
+            # 保存所有文件（使用流式处理减少内存使用）
+            for i, file in enumerate(files):
+                if file.filename != '':  # 只处理非空文件
+                    original_filename = file.filename  # 保存原始文件名（包含中文）
+                    original_filenames.append(original_filename)
+                    
+                    # 提取文件扩展名
+                    _, file_ext = os.path.splitext(original_filename)
+                    # 使用task_id和索引作为基础文件名，正确添加扩展名
+                    secure_unique_filename = f"{task_id}_{i}{file_ext.lower()}"  # 存储时使用安全文件名，保持扩展名格式
+                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_unique_filename)
+                    
+                    # 使用流式写入以减少内存占用
+                    file.save(file_path)
+                    file_paths.append(file_path)
+                    
+                    # 释放文件对象以释放内存
+                    del file
+            
+            # 更新任务状态中的文件名列表
+            task_status[task_id]['input_filenames'] = original_filenames
+            save_task_status()
+            
+            log_info(f"成功保存 {len(file_paths)} 个文件")
+            
+        except Exception as save_error:
+            log_error(f"保存文件时发生错误: {str(save_error)}")
+            # 清理已保存的文件
+            for fp in file_paths:
+                if os.path.exists(fp):
+                    try:
+                        os.remove(fp)
+                    except:
+                        pass
+            return jsonify({'error': f'保存文件时发生错误: {str(save_error)}'}), 500
         
         # 检查是否成功上传了任何文件
         if not file_paths:
@@ -492,31 +543,11 @@ def upload_file():
         
         output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
         
-        # 记录任务开始时间
-        start_time = time.time()
-        
-        # 从配置中心读取模型信息
-        text_model = config.get('text_model', 'qwen-plus')
-        image_model = config.get('image_model', 'qwen-vl-plus')
-        
-        # 初始化任务状态
-        task_status[task_id] = {
-            'status': 'pending',
-            'progress': 0,
-            'input_filenames': original_filenames,  # 存储原始完整文件名列表
-            'start_time': start_time,
-            'end_time': None,
-            'result': None,
-            'error': None,
-            'text_model': text_model,
-            'image_model': image_model
-        }
-        save_task_status()  # 保存状态到文件
-        
-        # 添加任务到队列
+        # 对于大量文件，实现分批处理机制
+        # 但在当前实现中，我们先提交一个任务，后续可以扩展为分批处理多个任务
         task_data = {
             'task_id': task_id,
-            'file_paths': file_paths,  # 修改为file_paths以支持多个文件
+            'file_paths': file_paths,  # 传递所有文件路径
             'api_key': api_key,  # 修改为api_key以符合命名规范
             'prompt': prompt,
             'output_path': output_path
@@ -524,6 +555,7 @@ def upload_file():
         
         task_queue.put(task_data)
         
+        # 返回成功响应
         return jsonify({
             'success': True,
             'task_id': task_id,
@@ -533,8 +565,14 @@ def upload_file():
     except Exception as e:
         # 记录异常
         temp_task_id = str(uuid.uuid4())
-        log_error(f"上传过程中发生错误 {temp_task_id}: {str(e)}")
-        return jsonify({'error': f'上传过程中发生错误: {str(e)}'}), 500
+        error_msg = str(e)
+        log_error(f"上传过程中发生错误 {temp_task_id}: {error_msg}")
+        
+        # 特别处理413错误
+        if "413" in error_msg or "Request Entity Too Large" in error_msg:
+            return jsonify({'error': '上传文件总大小超过限制，请减少文件数量或分批次上传'}), 413
+            
+        return jsonify({'error': f'上传过程中发生错误: {error_msg}'}), 500
 
 @app.route('/task_status/<task_id>')
 def get_task_status(task_id):
@@ -908,4 +946,4 @@ if __name__ == '__main__':
     # os.chdir(application_path)
     
     # 运行应用
-    app.run(debug=False, port=5000)  # 改为端口5000保持一致性
+    app.run(debug=False, port=5001)  # 改为端口5000保持一致性
