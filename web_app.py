@@ -197,7 +197,7 @@ def process_task(task_id, file_paths, api_key, prompt, output_path):
             cmd,
             capture_output=True,
             env=env,
-            timeout=600  # 增加超时时间以支持多文件处理
+            timeout=6000  # 增加超时时间以支持多文件处理
         )
         
         # 更新进度到80%
@@ -345,7 +345,7 @@ def process_task(task_id, file_paths, api_key, prompt, output_path):
     except subprocess.TimeoutExpired:
         # 处理超时
         task_status[task_id]['status'] = 'failed'
-        task_status[task_id]['error'] = "处理超时 (超过10分钟)"
+        task_status[task_id]['error'] = "处理超时 (超过100分钟)"
         task_status[task_id]['progress'] = 100
         task_status[task_id]['result'] = {
             'message': '处理超时: 任务执行时间超过10分钟'
@@ -353,9 +353,9 @@ def process_task(task_id, file_paths, api_key, prompt, output_path):
         save_task_status()  # 保存状态到文件
         
         # 记录错误日志
-        log_error(f"任务 {task_id} 超时错误: 处理超时 (超过10分钟)")
+        log_error(f"任务 {task_id} 超时错误: 处理超时 (超过100分钟)")
         # 同时记录到详细错误日志文件
-        log_error_detail(task_id, ', '.join(file_paths), "处理超时 (超过10分钟)", "timeout_error")
+        log_error_detail(task_id, ', '.join(file_paths), "处理超时 (超过100分钟)", "timeout_error")
         
         task_status[task_id]['end_time'] = time.time()
         save_task_status()  # 保存状态到文件
@@ -680,14 +680,20 @@ def update_config():
 
 @app.route('/tasks')
 def get_all_tasks():
-    """获取所有任务的状态"""
+    """获取所有任务的状态，按开始时间倒序排序（最新的任务在前）"""
     try:
-        tasks = {}
+        # 转换为列表并按start_time字段降序排序
+        task_items = []
         for task_id, status_info in task_status.items():
             task_copy = status_info.copy()
-            # 保留input_filename、processing_time和其他相关信息用于前端显示
-            # 转换用时等信息已经在task_status中，这里不再需要额外处理
-            tasks[task_id] = task_copy
+            task_copy['task_id'] = task_id  # 添加任务ID到任务信息中
+            task_items.append(task_copy)
+        
+        # 按开始时间排序，确保start_time存在且为数字类型
+        task_items.sort(key=lambda x: x.get('start_time', 0), reverse=True)
+        
+        # 转换回字典格式
+        tasks = {item['task_id']: item for item in task_items}
         return jsonify(tasks)
     except Exception as e:
         temp_task_id = str(uuid.uuid4())

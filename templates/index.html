@@ -1031,7 +1031,6 @@
                 
                 const formData = new FormData(this);
                 const submitBtn = document.getElementById('submitBtn');
-                const progressArea = document.getElementById('progressArea');
 
                 // 验证文件
                 if (!fileInput.files || fileInput.files.length === 0) {
@@ -1069,13 +1068,7 @@
 
                 // 禁用提交按钮
                 submitBtn.disabled = true;
-                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 处理中...';
-
-                // 显示进度区域
-                progressArea.style.display = 'block';
-                document.getElementById('progressInfo').textContent = `正在上传 ${fileInput.files.length} 个文件...`;
-                document.querySelector('.progress-bar').style.width = '10%';
-                document.getElementById('progressText').textContent = '10%';
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 提交中...';
 
                 // 提交文件
                 fetch('/upload', {
@@ -1085,104 +1078,44 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        currentTaskId = data.task_id;
-                        document.getElementById('progressInfo').textContent = data.message;
-                        startTaskPolling(data.task_id);
+                        // 任务提交成功，重置表单
+                        fileInput.value = '';
+                        const selectedFilesList = document.getElementById('selectedFilesList');
+                        selectedFilesList.style.display = 'none';
+                        
+                        // 显示成功消息
+                        showToast('任务已提交成功，请在任务管理中查看进度', 'success');
+                        
+                        // 重置按钮状态
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
+                        
+                        // 可选：自动导航到任务管理页面
+                        setTimeout(() => {
+                            const tasksTab = document.querySelector('.nav-item-custom[data-tab="tasks"]');
+                            if (tasksTab) {
+                                tasksTab.click();
+                            }
+                        }, 1500);
                     } else {
                         throw new Error(data.error);
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    document.getElementById('progressInfo').textContent = '上传失败: ' + error.message;
-                    document.getElementById('progressInfo').className = 'alert alert-danger';
+                    showToast('上传失败: ' + error.message, 'error');
                     submitBtn.disabled = false;
                     submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
-                    
-                    // 5秒后自动隐藏进度区域
-                    setTimeout(() => {
-                        progressArea.style.display = 'none';
-                    }, 5000);
                 });
             });
 
-            // 轮询任务状态
+            // 轮询任务状态功能已移除，改为直接跳转到任务管理页面
             function startTaskPolling(taskId) {
-                if (isPolling) return;
-                isPolling = true;
-
-                const progressInterval = setInterval(() => {
-                    if (!currentTaskId) {
-                        clearInterval(progressInterval);
-                        return;
-                    }
-
-                    fetch('/task_status/' + currentTaskId)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.error) {
-                            clearInterval(progressInterval);
-                            isPolling = false;
-                            document.getElementById('progressInfo').textContent = '错误: ' + data.error;
-                            document.getElementById('progressInfo').className = 'alert alert-danger';
-                            document.getElementById('submitBtn').disabled = false;
-                            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
-                            return;
-                        }
-
-                        // 更新进度条
-                        const progress = data.progress || 0;
-                        document.querySelector('.progress-bar').style.width = progress + '%';
-                        document.getElementById('progressText').textContent = progress + '%';
-
-                        // 更新状态信息
-                        document.getElementById('progressInfo').textContent = '任务状态: ' + getStatusText(data.status);
-                        
-                        // 根据状态设置样式
-                        let alertClass = 'alert-info';
-                        if (data.status === 'completed') {
-                            alertClass = 'alert-success';
-                            clearInterval(progressInterval);
-                            isPolling = false;
-                            
-                            // 显示成功消息和下载链接
-                            document.getElementById('progressInfo').innerHTML = `
-                                <i class="fas fa-check-circle text-success"></i> 
-                                处理完成！<br>
-                                <a href="/download/${data.result.output_file}" class="btn btn-success btn-sm mt-2">
-                                    <i class="fas fa-download"></i> 下载结果
-                                </a>
-                                <button class="btn btn-outline-primary btn-sm mt-2" onclick="openMarkdownPreview('${data.result.output_file}')">
-                                    <i class="fas fa-eye"></i> 预览
-                                </button>
-                            `;
-                            
-                            document.getElementById('submitBtn').disabled = false;
-                            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
-                        } else if (data.status === 'failed') {
-                            alertClass = 'alert-danger';
-                            clearInterval(progressInterval);
-                            isPolling = false;
-                            document.getElementById('progressInfo').innerHTML = '<i class="fas fa-exclamation-triangle text-danger"></i> 处理失败: ' + (data.error || (data.result && data.result.message ? data.result.message : ''));
-                            document.getElementById('submitBtn').disabled = false;
-                            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
-                        }
-                        
-                        document.getElementById('progressInfo').className = 'alert ' + alertClass;
-                    })
-                    .catch(error => {
-                        console.error('Error polling task status:', error);
-                        clearInterval(progressInterval);
-                        isPolling = false;
-                        document.getElementById('progressInfo').textContent = '轮询任务状态失败: ' + error.message;
-                        document.getElementById('progressInfo').className = 'alert alert-danger';
-                        document.getElementById('submitBtn').disabled = false;
-                        document.getElementById('submitBtn').innerHTML = '<i class="fas fa-paper-plane"></i> 开始处理';
-                    });
-                }, 2000); // 每2秒轮询一次
+                // 这个函数现在只是为了保持向后兼容性
+                console.log('任务已提交，无需轮询状态');
             }
 
-            // 获取状态文本
+            // 获取状态文本（保留此函数供任务管理页面使用）
             function getStatusText(status) {
                 switch(status) {
                     case 'pending': return '等待处理';
