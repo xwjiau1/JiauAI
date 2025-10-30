@@ -1039,11 +1039,7 @@
                     return;
                 }
 
-                // 添加所有选中的文件到formData
-                for (let i = 0; i < fileInput.files.length; i++) {
-                    const file = fileInput.files[i];
-                    formData.append('file', file);
-                }
+                // 注意：不再需要显式添加文件，FormData构造函数已经自动包含了表单中的所有字段，包括文件
 
                 // 从系统配置中获取API Key，不再从表单读取
                 let apiKey = null;

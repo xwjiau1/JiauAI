@@ -170,19 +170,23 @@ def process_task(task_id, file_paths, api_key, prompt, output_path):
         
         # 构建命令 - 针对多文件处理
         cmd = [
-            'python', 'pdf_to_knowledge_md.py',
-            '--prompt', prompt,
-            '--output', output_path
+            'python', 'pdf_to_knowledge_md.py'
         ]
         
-        # 添加所有文件路径到命令
-        for file_path in file_paths:
-            cmd.append(file_path)
+        # 只在prompt不为空时添加--prompt参数
+        if prompt:
+            cmd.extend(['--prompt', prompt])
+            
+        cmd.extend(['--output', output_path])
         
         # 使用传入的api_key或配置中的api_key
         api_key_to_use = api_key or config.get('api_key', '')
         if api_key_to_use:
             cmd.extend(['--api-key', api_key_to_use])
+        
+        # 添加所有文件路径到命令（确保文件路径在所有选项参数之后）
+        for file_path in file_paths:
+            cmd.append(file_path)
         
         # 更新进度到20%
         task_status[task_id]['progress'] = 20
@@ -337,7 +341,7 @@ def process_task(task_id, file_paths, api_key, prompt, output_path):
 
         task_status[task_id]['end_time'] = time.time()
         save_task_status()  # 保存状态到文件
-        
+            
     except subprocess.TimeoutExpired:
         # 处理超时
         task_status[task_id]['status'] = 'failed'
@@ -370,195 +374,6 @@ def process_task(task_id, file_paths, api_key, prompt, output_path):
         log_error(f"任务 {task_id} 异常: {str(e)}")
         # 同时记录到详细错误日志文件
         log_error_detail(task_id, ', '.join(file_paths), str(e), "processing_exception")
-        
-        task_status[task_id]['end_time'] = time.time()
-        save_task_status()  # 保存状态到文件
-        
-        task_status[task_id]['end_time'] = time.time()
-        save_task_status()  # 保存状态到文件
-        
-        # 更新进度到20%
-        task_status[task_id]['progress'] = 20
-        save_task_status()  # 保存状态到文件
-        
-        # 执行处理 - 使用二进制模式避免编码问题
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            env=env,
-            timeout=300  # 5分钟超时
-        )
-        
-        # 更新进度到80%
-        task_status[task_id]['progress'] = 80
-        save_task_status()  # 保存状态到文件
-        
-        # 手动解码输出，使用UTF-8编码并处理可能的解码错误
-        try:
-            stdout_str = result.stdout.decode('utf-8')
-        except UnicodeDecodeError:
-            # 如果UTF-8解码失败，使用系统默认编码并替换错误字符
-            stdout_str = result.stdout.decode('utf-8', errors='replace')
-
-        try:
-            stderr_str = result.stderr.decode('utf-8')
-        except UnicodeDecodeError:
-            # 如果UTF-8解码失败，使用系统默认编码并替换错误字符
-            stderr_str = result.stderr.decode('utf-8', errors='replace')
-
-        if result.returncode == 0:
-            # 处理成功
-            end_time = time.time()
-            processing_duration = end_time - task_status[task_id]['start_time']  # 计算总处理时间（秒）
-            
-            # 获取输出文件的大小（字数）
-            output_length = 0
-            if os.path.exists(output_path):
-                with open(output_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    output_length = len(content)
-                    
-            # 从子进程输出中提取token用量
-            token_usage = 0
-            image_token_usage = 0
-            import re
-            
-            # 检查标准输出中的文本处理token用量
-            token_match = re.search(r'TOKEN_USAGE:(\d+)', stdout_str)
-            if token_match:
-                token_usage = int(token_match.group(1))
-                log_info(f"任务 {task_id} 从子进程输出中提取到文本处理token用量: {token_usage}")
-            else:
-                # 尝试从错误输出中查找（以防万一输出到stderr）
-                token_match = re.search(r'TOKEN_USAGE:(\d+)', stderr_str)
-                if token_match:
-                    token_usage = int(token_match.group(1))
-                    log_info(f"任务 {task_id} 从错误输出中提取到文本处理token用量: {token_usage}")
-                else:
-                    log_info(f"任务 {task_id} 未找到文本处理token用量信息")
-            
-            # 检查标准输出中的图像识别token用量
-            image_token_matches = re.findall(r'IMAGE_TOKEN_USAGE:(\d+)', stdout_str)
-            if image_token_matches:
-                for match in image_token_matches:
-                    image_token_usage += int(match)
-                log_info(f"任务 {task_id} 从子进程输出中提取到图像识别token用量: {image_token_usage}")
-            else:
-                # 尝试从错误输出中查找
-                image_token_matches = re.findall(r'IMAGE_TOKEN_USAGE:(\d+)', stderr_str)
-                if image_token_matches:
-                    for match in image_token_matches:
-                        image_token_usage += int(match)
-                    log_info(f"任务 {task_id} 从错误输出中提取到图像识别token用量: {image_token_usage}")
-            
-            # 计算总token用量
-            total_token_usage = token_usage + image_token_usage
-            log_info(f"任务 {task_id} 总token用量: {total_token_usage} (文本处理: {token_usage} + 图像识别: {image_token_usage})")
-
-            task_status[task_id]['status'] = 'completed'
-            task_status[task_id]['progress'] = 100
-            # 将处理时间和输出字数作为顶级字段，方便前端访问
-            task_status[task_id]['processing_time'] = processing_duration  # 以秒为单位的处理时间
-            task_status[task_id]['output_length'] = output_length  # 输出字数
-            task_status[task_id]['token_usage'] = total_token_usage  # 设置实际的总token用量
-            task_status[task_id]['image_token_usage'] = image_token_usage  # 记录图像识别token用量
-            
-            task_status[task_id]['result'] = {
-                'output_file': os.path.basename(output_path),
-                'message': '处理成功',
-                'processing_time': processing_duration,  # 以秒为单位的处理时间
-                'output_length': output_length,  # 输出字数
-                'token_usage': total_token_usage,  # 使用实际计算的总token用量
-                'image_token_usage': image_token_usage  # 记录图像识别token用量
-            }
-            save_task_status()  # 保存状态到文件
-            
-            # 保存处理记录
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            record = {
-                'task_id': task_id,
-                'input_file': task_status[task_id]['input_filename'],  # 使用完整的原始文件名
-                'unique_input_file': os.path.basename(file_path),  # 内部存储的安全文件名
-                'output_file': os.path.basename(output_path),  # 包含原始文件名的输出文件名
-                'prompt': prompt,
-                'timestamp': timestamp,
-                'processing_time': task_status[task_id]['start_time'],  # 任务开始的Unix时间戳
-                'duration_seconds': processing_duration,  # 处理耗时（秒）
-                'status': 'completed',
-                'output_length': output_length,  # 输出字数
-                'token_usage': total_token_usage,  # 使用总token用量
-                'image_token_usage': image_token_usage  # 添加图像识别token用量记录
-            }
-            
-            # 保存到JSON记录文件
-            records_file = os.path.join('.wucai', 'processing_records.json')
-            records = []
-            if os.path.exists(records_file):
-                try:
-                    with open(records_file, 'r', encoding='utf-8') as f:
-                        content = f.read().strip()
-                        if content:  # 检查文件内容是否为空
-                            records = json.loads(content)
-                        else:
-                            records = []  # 空文件则初始化为空列表
-                except (json.JSONDecodeError, FileNotFoundError):
-                    records = []  # 如果解析失败或文件不存在，初始化为空列表
-            
-            records.append(record)
-            
-            with open(records_file, 'w', encoding='utf-8') as f:
-                json.dump(records, f, ensure_ascii=False, indent=2)
-                
-        else:
-            # 处理失败 - 现在能更好地捕获子进程错误
-            task_status[task_id]['status'] = 'failed'
-            task_status[task_id]['error'] = stderr_str
-            task_status[task_id]['progress'] = 100
-            task_status[task_id]['result'] = {
-                'message': f'处理失败: {stderr_str}'
-            }
-            save_task_status()  # 保存状态到文件
-            
-            # 记录错误日志 - 现在会记录到全局错误日志
-            log_error(f"任务 {task_id} 错误: {stderr_str}")
-            # 同时记录到详细错误日志文件
-            log_error_detail(task_id, file_path, f"处理失败: {stderr_str}", "processing_error")
-
-        task_status[task_id]['end_time'] = time.time()
-        save_task_status()  # 保存状态到文件
-        
-    except subprocess.TimeoutExpired:
-        # 处理超时
-        task_status[task_id]['status'] = 'failed'
-        task_status[task_id]['error'] = "处理超时 (超过5分钟)"
-        task_status[task_id]['progress'] = 100
-        task_status[task_id]['result'] = {
-            'message': '处理超时: 任务执行时间超过5分钟'
-        }
-        save_task_status()  # 保存状态到文件
-        
-        # 记录错误日志
-        log_error(f"任务 {task_id} 超时错误: 处理超时 (超过5分钟)")
-        # 同时记录到详细错误日志文件
-        log_error_detail(task_id, file_path, "处理超时 (超过5分钟)", "timeout_error")
-        
-        task_status[task_id]['end_time'] = time.time()
-        save_task_status()  # 保存状态到文件
-        
-    except Exception as e:
-        # 处理异常
-        task_status[task_id]['status'] = 'failed'
-        task_status[task_id]['error'] = str(e)
-        task_status[task_id]['progress'] = 100
-        task_status[task_id]['result'] = {
-            'message': f'处理过程中发生错误: {str(e)}'
-        }
-        save_task_status()  # 保存状态到文件
-        
-        # 记录错误日志
-        log_error(f"任务 {task_id} 异常: {str(e)}")
-        # 同时记录到详细错误日志文件
-        log_error_detail(task_id, file_path, str(e), "processing_exception")
         
         task_status[task_id]['end_time'] = time.time()
         save_task_status()  # 保存状态到文件
@@ -606,13 +421,27 @@ def upload_file():
         if 'file' not in request.files:
             return jsonify({'error': '没有文件'}), 400
             
-        files = request.files.getlist('file')
-        if not files or all(file.filename == '' for file in files):
-            return jsonify({'error': '没有选择文件'}), 400
+        # 获取所有文件
+        all_files = request.files.getlist('file')
+        
+        # 去除重复文件（保留第一个实例）
+        files = []
+        seen_filenames = set()
+        for file in all_files:
+            if file.filename != '':
+                # 如果文件名已经存在，跳过这个文件
+                if file.filename in seen_filenames:
+                    log_info(f"跳过重复文件: {file.filename}")
+                    continue
+                seen_filenames.add(file.filename)
+                files.append(file)
+        
+        if not files:
+            return jsonify({'error': '没有选择文件或所有文件都是重复的'}), 400
         
         # 检查是否有不支持的文件格式
         for file in files:
-            if file.filename != '' and not allowed_file(file.filename):
+            if not allowed_file(file.filename):
                 return jsonify({'error': f'不支持的文件格式: {file.filename}'}), 400
         
         # 获取提示词参数
@@ -1079,4 +908,4 @@ if __name__ == '__main__':
     # os.chdir(application_path)
     
     # 运行应用
-    app.run(debug=False, port=5002)  # 改为端口5000保持一致性
+    app.run(debug=False, port=5000)  # 改为端口5000保持一致性
