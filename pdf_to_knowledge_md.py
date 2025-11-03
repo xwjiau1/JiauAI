@@ -646,12 +646,12 @@ def process_markdown_with_images(api_key, markdown_content, base_path, user_prom
             original_img_path = Path(img_path).name
             pattern = r'!\[.*?\][^)]*' + re.escape(original_img_path) + r'[^)]*\)'
         
-        # 替换markdown，添加图片描述
-        enhanced_content = re.sub(
-            pattern, 
-            f'![图示]({img_path})\n\n**图片描述**: {description}\n\n', 
-            enhanced_content
-        )
+        # 替换markdown，添加图片描述 - 使用回调函数避免转义字符问题
+        def replace_callback(match):
+            # 直接返回替换内容，避免正则表达式处理描述中的特殊字符
+            return f'![图示]({img_path})\n\n**图片描述**: {description}\n\n'
+        
+        enhanced_content = re.sub(pattern, replace_callback, enhanced_content)
     
     # 如果没有图片，直接返回原始内容
     if not image_paths:
@@ -775,12 +775,12 @@ def process_ppt_with_images(api_key, content, base_path, user_prompt, config):
         original_img_path = Path(img_path).name
         pattern = r'!\[.*?\][^)]*' + re.escape(original_img_path) + r'[^)]*\)'
         
-        # 替换markdown，添加图片描述
-        enhanced_content = re.sub(
-            pattern, 
-            f'![图示]({img_path})\n\n**图片描述**: {description}\n\n', 
-            enhanced_content
-        )
+        # 替换markdown，添加图片描述 - 使用回调函数避免转义字符问题
+        def replace_callback(match):
+            # 直接返回替换内容，避免正则表达式处理描述中的特殊字符
+            return f'![图示]({img_path})\n\n**图片描述**: {description}\n\n'
+        
+        enhanced_content = re.sub(pattern, replace_callback, enhanced_content)
     
     # 如果没有图片，直接返回原始内容
     if not image_paths:
