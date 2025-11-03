@@ -834,12 +834,35 @@
                 </button>
             </div>
             
-            <div class="card">
+            <!-- 任务监控区域 - 进行中任务 -->
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">
+                        <i class="fas fa-spinner fa-spin mr-2"></i>任务监控（进行中）
+                    </h4>
+                </div>
                 <div class="card-body">
-                    <div id="tasksList">
-                        <div class="text-center text-muted py-5">
-                            <i class="fas fa-inbox fa-3x mb-3"></i>
-                            <p class="lead">暂无任务记录</p>
+                    <div id="activeTasksList">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-clock fa-2x mb-2"></i>
+                            <p>暂无进行中的任务</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 任务管理区域 - 已完成任务 -->
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h4 class="mb-0">
+                        <i class="fas fa-archive mr-2"></i>任务管理（已完成）
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div id="completedTasksList">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-inbox fa-2x mb-2"></i>
+                            <p>暂无已完成的任务</p>
                         </div>
                     </div>
                 </div>
@@ -1129,15 +1152,54 @@
             // 刷新任务列表
             document.getElementById('refreshTasks').addEventListener('click', loadTasks);
             
+            // 删除任务函数
+            window.deleteTask = function(taskId) {
+                if (confirm('确定要删除此任务记录吗？此操作不可恢复。')) {
+                    fetch(`/delete_task/${taskId}`, {
+                        method: 'DELETE'
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('删除失败');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showToast('任务删除成功', 'success');
+                            loadTasks(); // 重新加载任务列表
+                        } else {
+                            throw new Error(data.error || '删除失败');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('删除任务失败:', error);
+                        showToast('删除失败: ' + error.message, 'error');
+                    });
+                }
+            };
+            
             // 刷新知识库列表
             document.getElementById('refreshKnowledge').addEventListener('click', loadKnowledge);
 
             // 加载任务列表
             function loadTasks() {
+                // 先检查是否存在外部的loadTasks实现（来自task-manager.js）
+                if (window.originalLoadTasks) {
+                    // 如果存在，优先调用外部实现
+                    return window.originalLoadTasks();
+                }
+                
                 fetch('/tasks')
                 .then(response => response.json())
                 .then(data => {
                     const tasksList = document.getElementById('tasksList');
+                    // 检查元素是否存在
+                    if (!tasksList) {
+                        console.warn('Tasks list element not found, skipping task rendering.');
+                        return;
+                    }
+                    
                     if (Object.keys(data).length === 0) {
                         tasksList.innerHTML = `
                             <div class="text-center text-muted py-4">
@@ -1160,7 +1222,7 @@
                                                 ? `批量处理: ${task.input_filenames.length} 个文件` 
                                                 : (task.input_filenames && task.input_filenames.length === 1 ? task.input_filenames[0] : (task.input_filename || (taskId.substring(0, 8) + '...')))}
                                         </h6>
-                                        <small class="text-muted">状态: ${getStatusText(task.status)}</small>
+                                        <small class="text-muted">状态: ${getStatusText ? getStatusText(task.status) : task.status}</small>
                                         ${(task.input_filenames && Array.isArray(task.input_filenames) && task.input_filenames.length > 1) 
                                             ? `<div class="mt-1">
                                                 <small class="text-muted">
@@ -1208,12 +1270,15 @@
                 })
                 .catch(error => {
                     console.error('Error loading tasks:', error);
-                    document.getElementById('tasksList').innerHTML = `
-                        <div class="alert alert-danger">
-                            加载任务列表失败: ${error.message}
-                        </div>
-                    `;
-                });
+                    const tasksList = document.getElementById('tasksList');
+                    if (tasksList) {
+                        tasksList.innerHTML = `
+                            <div class="alert alert-danger">
+                                加载任务列表失败: ${error.message}
+                            </div>
+                        `;
+                    }
+                })
             }
 
             // 加载知识库列表
@@ -1899,6 +1964,9 @@
             window.openMarkdownPreview = openMarkdownPreview;
         });
     </script>
+    
+    <!-- 任务管理功能脚本 -->
+    <script src="{{ url_for('static', filename='js/task-manager.js') }}"></script>
     
     <!-- 用于代码高亮的highlight.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>

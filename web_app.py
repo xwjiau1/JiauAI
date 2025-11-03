@@ -867,6 +867,31 @@ def download_error_log():
         log_error(f"下载错误日志时发生错误 {temp_task_id}: {str(e)}")
         return f"下载错误日志时发生错误: {str(e)}", 500
 
+@app.route('/delete_task/<task_id>', methods=['DELETE'])
+def delete_task(task_id):
+    """删除任务记录
+    从任务状态中移除指定的任务
+    """
+    try:
+        global task_status
+        
+        # 检查任务是否存在
+        if task_id not in task_status:
+            return jsonify({'success': False, 'error': '任务不存在'}), 404
+        
+        # 从任务状态中移除任务
+        del task_status[task_id]
+        
+        # 保存更新后的任务状态到文件
+        save_task_status()
+        
+        log_info(f"成功删除任务: {task_id}")
+        return jsonify({'success': True, 'message': '任务删除成功'})
+    except Exception as e:
+        temp_task_id = str(uuid.uuid4())
+        log_error(f"删除任务时发生错误 {temp_task_id} (任务ID: {task_id}): {str(e)}")
+        return jsonify({'success': False, 'error': f'删除失败: {str(e)}'}), 500
+
 @app.route('/delete_document/<filename>', methods=['DELETE'])
 def delete_document(filename):
     """删除知识库文档
@@ -952,4 +977,4 @@ if __name__ == '__main__':
     # os.chdir(application_path)
     
     # 运行应用
-    app.run(debug=False, port=5001)  # 改为端口5000保持一致性
+    app.run(debug=False, port=5002)  # 改为端口5000保持一致性
